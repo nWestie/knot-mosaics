@@ -1,0 +1,11 @@
+.py[cod]
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.pdm-python
+
+# Don't track Rust build artifacts
+target/
+# Don't track generated data files
+data/
