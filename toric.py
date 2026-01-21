@@ -1,3 +1,4 @@
+#! /home/westie/miniforge3/envs/sage/bin/python
 from PIL import Image, ImageDraw
 #from snappy import *
 from sage.all import *
@@ -13,8 +14,8 @@ def main():
 
     parser.add_argument('-i', '--images', help='Print image(s)', action='store_true')
     parser.add_argument('-s', '--string', metavar='<mosaic string>',help='Determine knot type from string')
-    parser.add_argument('-f', '--file',metavar = '<input file, output file>',nargs=2,help ='Create knot catalog from file')
-    parser.add_argument('-r', '--rapunzel',metavar='<p> <q>',nargs=2,type=int, help='Perform 1-braid algorithm to generate torus knot (p,q)')
+    parser.add_argument('-f', '--file',metavar = ('<input file>','<output file>'),nargs=2,help ='Create knot catalog from file')
+    parser.add_argument('-r', '--rapunzel',metavar=('<p>', '<q>'),nargs=2,type=int, help='Perform 1-braid algorithm to generate torus knot (p,q)')
 
     args = parser.parse_args()
 
@@ -129,11 +130,11 @@ class toric_mosaic:
     @classmethod
     def string_catalog(cls, mosaic_string, images):
         size = int(len(mosaic_string)**(0.5))
-        mosaic = [[10]*(size**2)]
+        mosaic = [[10]*(size**2)] # ASK: why initialize to 10?
         mosaic.append([10]*(size**2))
         satisfied = [[False]*(size ** 2)]*2
         crossing_strands = [[[0]*4 for _ in range((size ** 2))] for _ in range(2)]
-        made_connections = [[[] for _ in range((size ** 2))] for _ in range(2)]
+        made_connections = [[[] for _ in range((size ** 2))] for _ in range(2)] #this line is redundant?
         crossing_indices = []
         pd_codes = []
         curr_tile = 0
@@ -157,6 +158,7 @@ class toric_mosaic:
             num = int(char, base = 16)
             mosaic[0][k] = num
             satisfied[0][k] = num == 0
+            # Starting tile is set to the first non-zero tile
             if starting_tile == None and num != 0:
                 starting_tile = k
             k += 1
@@ -165,9 +167,11 @@ class toric_mosaic:
         satisfied[1] = [False]*(size**2)
         mosaic[1] = [0]*(size**2)
         for i in range(size):
+            # iterating through columns edges?
             if mosaic[0][i*size] > 6 or mosaic[0][i*size] in (1,4,5):
                 for j in range(size):
-                    mosaic[1][i*size + j] += 5
+                    mosaic[1][i*size + j] += 5 # ASK: adding 5 to the whole row? Other one adds 6 if it is on top edge?
+            # iterating through top row edge?
             if mosaic[0][i] > 6 or mosaic[0][i] in (3,4,6):
                 for j in range(size):
                     mosaic[1][(j+1)*size - (i+1)] += 6
