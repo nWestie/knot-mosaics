@@ -18,7 +18,7 @@
             "request": "launch",
             "program": "./toric.py",
             "console": "integratedTerminal",
-            "args": "--string 0066127779a9439a --images"
+            "args": "--file data/test.txt"
         }
     ]
 }

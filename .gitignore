@@ -9,3 +9,4 @@ __pycache__/
 target/
 # Don't track generated data files
 data/
+testing/
