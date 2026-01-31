@@ -418,5 +418,5 @@ def to_png(matrix,output_filename):
 
     mosaic.save(output_filename)
 
-
-main()
+if __name__ == "__main__":
+    main()
