@@ -16,6 +16,9 @@
 				"panel": "shared",
 				"clear": true
 			},
+			"env": {
+				"RUST_BACKTRACE": "1"
+			}
 		}
 	]
 }
