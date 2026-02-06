@@ -196,8 +196,8 @@ fn main() -> Result<()> {
     //     .with_prompt("Path to Write Mosaics To?")
     //     .interact_text()
     //     .unwrap();
-    let size: usize = 4;
-    let output_path = "../data/4_cylinder.txt";
+    let size: usize = 5;
+    let output_path = "../data/5_cylinder.txt";
     let output_file = File::create(output_path)?;
     let mut outbuf = BufWriter::new(output_file);
 

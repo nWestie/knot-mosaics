@@ -414,7 +414,7 @@ class toric_mosaic:
                     output_file.write(f"\t{homf}: {knot_catalog[homf]}\n")
                     output_file.flush()
                     if images:
-                        img_path = f"images/{output_path.name}/{mosaic_string.strip()}.png"
+                        img_path = f"images/{output_path.stem}/{mosaic_string.strip()}.png"
                         to_png(mosaic[0], img_path)
         print(knot_count)
         output_file.close()

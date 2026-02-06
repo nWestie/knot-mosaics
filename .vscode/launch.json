@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "./toric.py",
             "console": "integratedTerminal",
-            "args": "--file data/test.txt"
+            "args": "--file data/test4.txt"
         }
     ]
 }
