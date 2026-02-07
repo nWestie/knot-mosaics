@@ -141,6 +141,15 @@ impl Mosaic {
             size,
         }
     }
+    fn crossing_ct(&self) -> usize {
+        let mut ct = 0;
+        for tile in &self.data {
+            if tile > &9u8 {
+                ct += 1
+            };
+        }
+        ct
+    }
     fn get(&self, x: usize, y: usize) -> u8 {
         self.data[y * self.size + x]
     }
@@ -186,6 +195,7 @@ impl Mosaic {
         }
     }
 }
+
 fn main() -> Result<()> {
     // let size: usize = Input::new()
     // .with_prompt("Size of generated mosaics?")
@@ -196,15 +206,17 @@ fn main() -> Result<()> {
     //     .with_prompt("Path to Write Mosaics To?")
     //     .interact_text()
     //     .unwrap();
-    let size: usize = 5;
-    let output_path = "../data/5_cylinder.txt";
+    let size: usize = 4;
+    // mosaics with <= this number of crossings will not be saved
+    let discard_crossings: usize = 2;
+    let output_path = "../data/4_cyl.txt";
     let output_file = File::create(output_path)?;
     let mut outbuf = BufWriter::new(output_file);
 
     let now = Instant::now(); //Timing 
 
     println!("generating ...");
-    mosaic_gen(&mut outbuf, size)?;
+    mosaic_gen(&mut outbuf, size, discard_crossings)?;
     print!(
         "Generation complete! ({:.6} s)",
         now.elapsed().as_secs_f64()
@@ -213,7 +225,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn mosaic_gen(output_buffer: &mut BufWriter<File>, size: usize) -> Result<()> {
+fn mosaic_gen(
+    output_buffer: &mut BufWriter<File>,
+    size: usize,
+    trim_crossings: usize,
+) -> Result<()> {
     let vector_length = size * size - 1;
     // let mut mosaic: Vec<u8> = vec![11; vector_length + 1]; // 11 is not a valid tile
     let mut mosaic: Mosaic = Mosaic::new(size);
@@ -243,7 +259,7 @@ fn mosaic_gen(output_buffer: &mut BufWriter<File>, size: usize) -> Result<()> {
             continue;
         }
         // if not rightward
-        if curr_tile == vector_length {
+        if (curr_tile == vector_length) && mosaic.crossing_ct() > trim_crossings {
             write_mosaic(output_buffer, &mosaic)?;
         }
 
@@ -276,7 +292,7 @@ fn calc_valid_tiles(mosaic: &Mosaic, curr_tile: usize, size: usize) -> &'static 
     //Find valid tiles for current tile based on surroundings
     let curr_x = curr_tile % size;
     let curr_y = curr_tile / size;
-    
+
     let right_tile = mosaic.right_tile(curr_x, curr_y);
     let left_tile = mosaic.left_tile(curr_x, curr_y);
     let up_tile = mosaic.up_tile(curr_x, curr_y);

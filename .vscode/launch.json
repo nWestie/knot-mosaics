@@ -23,9 +23,9 @@
             "name": "Py-Mosaics",
             "type": "debugpy",
             "request": "launch",
-            "program": "./toric.py",
+            "program": "./cylindrical.py",
             "console": "integratedTerminal",
-            "args": "--file data/test4.txt"
+            "args": "--string 0000121279a93434", 
         }
     ]
 }
