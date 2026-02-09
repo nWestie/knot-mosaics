@@ -1,7 +1,9 @@
 import argparse
 import os
 from pathlib import Path
+import textwrap
 from PIL import Image, ImageDraw
+from matplotlib import pyplot as plt
 from dataclasses import dataclass
 import mosaic_tools as mtool
 # sage doesn't have type support ¯\_(ツ)_/¯
@@ -168,15 +170,37 @@ class toric_mosaic:
                         break
                 knot = Link(pd_codes).remove_loops()
                 if images:
-                    img_path = f"images/{mosaic_string.strip()}.png"
-                    to_png(mosaic[0], img_path)
+                    to_png(mosaic[0], knot.homfly_polynomial(), mosaic_string)
                 print(knot.pd_code(), knot.homfly_polynomial())
 
 
-def to_png(matrix, output_filename):
+def to_png(matrix, func: str, mosaic_str: str):
+    img_path = f"images/{mosaic_str.strip()}.png"
+    
     img = mtool.to_img(matrix)
-    Path(output_filename).parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_filename)
+    Path(img_path).parent.mkdir(parents=True, exist_ok=True)
+    # img.save(out_path)
+
+    dpi: int = 200
+    func_text = textwrap.fill(func, width=60)
+
+    fig, ax = plt.subplots(nrows=2, figsize=(6, 8), gridspec_kw={
+                           "height_ratios": [4, 1]}, dpi=dpi)
+
+    # ---- Image ----
+    ax[0].imshow(img)
+    ax[0].axis("off")
+    ax[0].set_title(f"{img_path}", fontsize=14, pad=10)
+
+    # ---- Function text ----
+    ax[1].axis("off")
+    ax[1].text(0.5, 0.5, func_text, ha="center", va="center",
+               fontsize=12, family="monospace", wrap=True,)
+
+    plt.tight_layout()
+    plt.show()
+    # plt.savefig(out_path, bbox_inches="tight")
+    # plt.close(fig)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "./cylindrical.py",
             "console": "integratedTerminal",
-            "args": "--string 0000121279a93434", 
+            "args": "--string 0000121279a93434 --images", 
         }
     ]
 }
