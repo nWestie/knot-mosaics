@@ -2,7 +2,7 @@
 
 use dialoguer::Input;
 use std::collections::HashSet;
-use std::fs::File;
+use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Result, Write};
 use std::time::Instant;
 mod conn_table;
@@ -85,12 +85,15 @@ fn main() -> Result<()> {
     //     .with_prompt("Path to Write Mosaics To?")
     //     .interact_text()
     //     .unwrap();
-    let size: usize = 5;
+    
+    let size: usize = 4;
     // mosaics with <= this number of crossings will not be saved
     // for 5 crossings, we don't need anything under 6
-    let discard_crossings: usize = 5;
-    let output_path = "../data/5_cyl/pt";
-    let mut outbuf = RollingBufWriter::new(output_path, 100_000)?;
+    // for 4 crossings, anything <=2
+    let discard_crossings: usize = 2;
+    let output_folder = "../data/4_cyl";
+    create_dir_all(output_folder)?;
+    let mut outbuf = RollingBufWriter::new(output_folder, 100_000)?;
 
     let now = Instant::now(); //Timing 
 
