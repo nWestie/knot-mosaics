@@ -25,7 +25,15 @@
             "request": "launch",
             "program": "./cylindrical.py",
             "console": "integratedTerminal",
-            "args": "--string 0000121279a93434 --images", 
+            "args": "--directory data/4_cyl --images", 
+        },
+        {
+            "name": "Py-Toric",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./toric.py",
+            "console": "integratedTerminal",
+            "args": "--string 00211279a7aa3434 --images", 
         }
     ]
 }

@@ -10,4 +10,4 @@ target/
 # Don't track generated data files
 data/
 testing/
-images/
+output/

@@ -6,8 +6,9 @@ from PIL import Image, ImageDraw
 from matplotlib import pyplot as plt
 from dataclasses import dataclass
 import mosaic_tools as mtool
+from typing import Any
 # sage doesn't have type support ¯\_(ツ)_/¯
-from sage.all import Link  # type: ignore
+from sage.all import Link, SR  # type: ignore
 
 
 def main():
@@ -16,45 +17,76 @@ def main():
         '-i', '--images', help='Print image(s)', action='store_true')
     parser.add_argument('-s', '--string', metavar='<mosaic string>',
                         help='Determine knot type from string')
-    parser.add_argument('-f', '--file', help='Create knot catalog from file')
+    parser.add_argument(
+        '-d', '--directory', help='Create knot catalog from directory of mosaic lists')
     args = parser.parse_args()
 
     if args.string is not None:
-        catalog(args.string, args.images)
-        return
+        mosaic_str = args.string
+        knot = identify_mosaic(mosaic_str)
+        if not knot:
+            return
+        knotinfo = str(knot.get_knotinfo())
+        polynomial = str(SR(knot.homfly_polynomial()))
+        print(f"{mosaic_str} || {knotinfo} || {polynomial}")
 
-    # if args.file is not None:
-    #     (inp, out) = (Path(f) for f in args.file)
-    #     file_catalog(inp, out, args.images)
+        if args.images:
+            img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
+            gen_png(mosaic_str, polynomial, knotinfo, img_path)
+
+    if args.directory is not None:
+        inp = Path(args.directory)
+        out_file = Path("output")/(inp.stem+".txt")
+
+        catalog(inp, out_file)
 
 
-valid_connections = (
-    (()),
-    ((2, 3), (3, 2)),
-    ((0, 3), (3, 0)),
-    ((0, 1), (1, 0)),
-    ((2, 1), (1, 2)),
-    ((2, 0), (0, 2)),
-    ((1, 3), (3, 1)),
-    ((2, 3), (3, 2), (1, 0), (0, 1)),
-    ((0, 3), (3, 0), (2, 1), (1, 2)),
-    ((0, 2), (1, 3), (2, 0), (3, 1)),
-    ((0, 2), (1, 3), (2, 0), (3, 1)),
-    ((0, 2), (1, 3), (2, 0), (3, 1))
-)
+def catalog(inp_dir: Path, out_file: Path):
+    knot_list: list[str] = []
 
-def string_catalog(mosaic_string)->tuple[list[list[int]], list[int]]|None:
+    img_dir = out_file.parent / (out_file.stem+"_imgs")
+    img_dir.mkdir(parents=True, exist_ok=True)
+
+    def lines():
+        for file in inp_dir.iterdir():
+            if not file.is_file():
+                pass
+            for line in file.open():
+                yield line.strip()
+
+    # iterating over each line in each file in the dir
+    with out_file.open("w") as out_stream:
+        for mosaic_str in lines():
+            knot = identify_mosaic(mosaic_str)
+            if not knot:
+                continue
+
+            knotid = str(knot.get_knotinfo())
+
+            if knotid in knot_list:
+                continue
+            knot_list.append(knotid)
+
+            polynomial = str(SR(knot.homfly_polynomial()))
+            out_stream.write(f"{mosaic_str} || {knotid} || {polynomial}")
+            out_stream.flush()
+            print(f"Found {knotid}")
+
+            img_path = img_dir / (mosaic_str+".png")
+            gen_png(mosaic_str, polynomial, knotid, img_path)
+
+
+def identify_mosaic(mosaic_string) -> Link | None:
     size = int(len(mosaic_string)**(0.5))
     # ASK: why initialize to 10? isn't this a crossing?
     mosaic = [[10]*(size**2)]
     mosaic.append([0]*(size**2))
-    # ASK: satisfied tracks if a tile has been fully handled?
     satisfied: list[list[bool]] = [[False]*(size ** 2)]
+    # THIS CHANGED - used to be mirred between both layers
     satisfied.append([False]*(size**2))
     crossing_strands = [
         [[0]*4 for _ in range((size ** 2))] for _ in range(2)]
 
-    knot = None
     made_connections = [[[] for _ in range(size ** 2)] for _ in range(2)]
     crossing_indices = []
     pd_codes: list[list[int]] = []
@@ -165,31 +197,20 @@ def string_catalog(mosaic_string)->tuple[list[list[int]], list[int]]|None:
                 if pd_codes[-1][l] == strand_number:
                     pd_codes[-1][l] = 1
                     break
-            return pd_codes, mosaic[0]
-def catalog(mosaic_string, images):
-    tmp = string_catalog(mosaic_string)
-    if not tmp:
-        print("Not a knot")
-        return
-    pd_codes, mosaic = tmp
-    knot = Link(pd_codes).remove_loops()
-    
-    if images:
-        gen_png(mosaic, str(knot.homfly_polynomial()), mosaic_string)
-    print(knot.pd_code(), knot.homfly_polynomial())
+            return Link(pd_codes).remove_loops()
 
-def count_crossings(mosaic: list[int])->int:
-    return len([tile for tile in mosaic if tile in [10,11]])
 
-def gen_png(matrix, func: str, mosaic_str: str):
-    img_path = f"images/{mosaic_str.strip()}.png"
-    
+def count_crossings(mosaic: list[int]) -> int:
+    return len([tile for tile in mosaic if tile in [10, 11]])
+
+
+def gen_png(mosaic_str: str, homfly: str, id: str, img_path: Path):
+
+    matrix = mtool.string2matrix(mosaic_str)
     img = mtool.to_img(matrix)
-    Path(img_path).parent.mkdir(parents=True, exist_ok=True)
-    # img.save(out_path)
 
-    dpi: int = 200
-    func_text = textwrap.fill(f"${func}$", width=60)
+    dpi: int = 300
+    func_text = textwrap.fill(f"${homfly}$", width=60)
 
     fig, ax = plt.subplots(nrows=2, figsize=(6, 7), gridspec_kw={
                            "height_ratios": [6, 1]}, dpi=dpi)
@@ -203,13 +224,28 @@ def gen_png(matrix, func: str, mosaic_str: str):
     ax[1].axis("off")
     ax[1].text(0.5, 0.75, func_text, ha="center", va="center",
                fontsize=16, wrap=True,)
-    ax[1].text(0.5, 0.25, f"Crossing count = {count_crossings(matrix)}", ha="center", va="center",
+    ax[1].text(0.5, 0.25, f"ID: {id} Cross count: {count_crossings(matrix)}", ha="center", va="center",
                fontsize=16, wrap=True,)
 
     plt.tight_layout()
-    # plt.show()
     plt.savefig(img_path, bbox_inches="tight")
     plt.close(fig)
+
+
+valid_connections = (
+    (()),
+    ((2, 3), (3, 2)),
+    ((0, 3), (3, 0)),
+    ((0, 1), (1, 0)),
+    ((2, 1), (1, 2)),
+    ((2, 0), (0, 2)),
+    ((1, 3), (3, 1)),
+    ((2, 3), (3, 2), (1, 0), (0, 1)),
+    ((0, 3), (3, 0), (2, 1), (1, 2)),
+    ((0, 2), (1, 3), (2, 0), (3, 1)),
+    ((0, 2), (1, 3), (2, 0), (3, 1)),
+    ((0, 2), (1, 3), (2, 0), (3, 1))
+)
 
 
 if __name__ == "__main__":
