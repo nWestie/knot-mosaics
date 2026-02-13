@@ -269,7 +269,7 @@ class toric_mosaic:
                     if pd_codes[-1][l] == strand_number:
                         pd_codes[-1][l] = 1
                         break
-                knot = Link(pd_codes).remove_loops()
+                knot = Link(pd_codes)
                 if images:
                     to_png(mosaic[0], f"images/{mosaic_string.strip()}.png")
                 print(knot.pd_code(), knot.homfly_polynomial())
@@ -291,13 +291,6 @@ class toric_mosaic:
         made_connections = [[[] for _ in range((size ** 2))] for _ in range(2)]
         crossing_indices = []
         pd_codes = []
-        curr_tile = 0
-        layer = 0  # 0 "front", 1 holds hidden crossings
-        starting_tile = None
-        face = 0
-        strand_number = 1
-        i = 0
-        num = 0
         knot_count = 0
 
         knot = None
@@ -306,6 +299,7 @@ class toric_mosaic:
                                  for _ in range(size ** 2)] for _ in range(2)]
             crossing_indices = []
             pd_codes = []
+            # 0 "front", 1 holds hidden crossings
             curr_tile = layer = face = 0
             starting_tile = None
             strand_number = 1
@@ -422,7 +416,7 @@ class toric_mosaic:
 
 def to_png(matrix, output_filename):
     img = mosaic_tools.to_img(matrix)
-    Path(output_filename).parent.mkdir(parents=True,exist_ok=True)
+    Path(output_filename).parent.mkdir(parents=True, exist_ok=True)
     img.save(output_filename)
 
 

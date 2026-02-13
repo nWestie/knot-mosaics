@@ -1,79 +1,179 @@
 import argparse
+from collections import namedtuple
+from dataclasses import dataclass
+from functools import partial
+from multiprocessing import Pool
 import os
 from pathlib import Path
 import textwrap
-from PIL import Image, ImageDraw
 from matplotlib import pyplot as plt
-from dataclasses import dataclass
 import mosaic_tools as mtool
 from typing import Any
+from time import time
+
 # sage doesn't have type support ¯\_(ツ)_/¯
-from sage.all import Link, SR  # type: ignore
+from sage.all import Link, SR  # type:ignore
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '-i', '--images', help='Print image(s)', action='store_true')
+        '-i', '--images', help='Print image', action='store_true')
     parser.add_argument('-s', '--string', metavar='<mosaic string>',
                         help='Determine knot type from string')
     parser.add_argument(
         '-d', '--directory', help='Create knot catalog from directory of mosaic lists')
+    parser.add_argument(
+        '-m', '--merge', help='merge result files with this ID string')
     args = parser.parse_args()
+
+    if args.images:
+        img = mtool.to_img(mtool.string2matrix(args.string))
+        path = Path("output/other_img")/f"{args.string}.png"
+        img.save(path)
+        print(f"saved to {path}")
+        return
 
     if args.string is not None:
         mosaic_str = args.string
         knot = identify_mosaic(mosaic_str)
-        if not knot:
+        if not knot or not knot.is_knot():
+            print("Mosaic is not a knot")
             return
+        # knot = knot.simplify(exhaustive=True, height=3)
+        knot = knot.simplify()
         knotinfo = str(knot.get_knotinfo())
-        polynomial = str(SR(knot.homfly_polynomial()))
+        polynomial = str(knot.homfly_polynomial())
         print(f"{mosaic_str} || {knotinfo} || {polynomial}")
 
-        if args.images:
-            img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
-            gen_png(mosaic_str, polynomial, knotinfo, img_path)
+        img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
+        gen_png(mosaic_str, polynomial, knotinfo, img_path)
 
     if args.directory is not None:
-        inp = Path(args.directory)
-        out_file = Path("output")/(inp.stem+".txt")
+        inp_dir = Path(args.directory)
+        out_dir = Path("output")/(inp_dir.stem+"_raw")
 
-        catalog(inp, out_file)
+        catalog_raw(inp_dir, out_dir)
+    if args.merge is not None:
+        combine_results(args.merge)
 
 
-def catalog(inp_dir: Path, out_file: Path):
-    knot_list: list[str] = []
+@dataclass
+class Knot_Result:
+    mosaic_str: str
+    polynomial: str
 
-    img_dir = out_file.parent / (out_file.stem+"_imgs")
+
+def catalog_raw(inp_dir: Path, out_dir: Path):
+
+    t_start = time()
+
+    # files = [inp_dir/f"pt{ind}.txt" for ind in range(400)]
+    files = [f for f in inp_dir.iterdir() if f.is_file()]
+    # filter out files which already have a calculated result
+    files = [f for f in files if not (out_dir/f.name).is_file()]
+
+    print(f"Parsing {len(files)} files...")
+    with Pool(6, maxtasksperchild=4) as pool:
+        pool.map(partial(catalog_file, out_dir=out_dir), files)
+    dt = time()-t_start
+    # print(f"{tot_ct} mosiacs parsed in {dt:.0f}s: {tot_ct/dt:.0f} moaics/sec")
+    return
+
+
+def combine_results(path_id:str):
+    all_results: dict[str, str] = {}
+    
+    raw_results = Path(f"output/{path_id}_raw")
+    for file in raw_results.iterdir():
+        results, complete = load_result_file(file)
+        if not complete:
+            print(f"{file} is incomplete")
+        
+        for polynomial, mosaic in results.items():
+            if polynomial not in all_results:
+                all_results[polynomial] = mosaic
+
+    print("writing file and images...")
+    img_dir = Path(f"output/{path_id}_imgs")
     img_dir.mkdir(parents=True, exist_ok=True)
-
-    def lines():
-        for file in inp_dir.iterdir():
-            if not file.is_file():
-                pass
-            for line in file.open():
-                yield line.strip()
-
-    # iterating over each line in each file in the dir
-    with out_file.open("w") as out_stream:
-        for mosaic_str in lines():
+    out_file = Path(f"output/{path_id}_results.txt")
+    with out_file.open("w") as out:
+        for polynomial, mosaic_str in all_results.items():
             knot = identify_mosaic(mosaic_str)
-            if not knot:
-                continue
-
-            knotid = str(knot.get_knotinfo())
-
-            if knotid in knot_list:
-                continue
-            knot_list.append(knotid)
-
-            polynomial = str(SR(knot.homfly_polynomial()))
-            out_stream.write(f"{mosaic_str} || {knotid} || {polynomial}")
-            out_stream.flush()
-            print(f"Found {knotid}")
-
+            if knot is None:
+                print("ERR: should not be null knots in final results")
+                break
+            new_knot = knot.simplify()
+            if new_knot is not None:
+                knot = new_knot
+            
+            knotid = str(knot.get_knotinfo(unique=False))
+            polynomial = str(SR(polynomial))
             img_path = img_dir / (mosaic_str+".png")
             gen_png(mosaic_str, polynomial, knotid, img_path)
+            print(f"saved {img_path}")
+            out.write(
+                f"{mosaic_str} || {knotid} || {polynomial}\n")
+
+
+def load_result_file(file: Path) -> tuple[dict[str, str], bool]:
+    results = {}
+    with file.open("r") as inp:
+        for line in inp:
+            # If this line is not present, indicates an interruption during writing.
+            if line.strip() == "END_RESULT":
+                return results, True
+            mosaic, polynomial = [p.strip() for p in line.split(",")]
+            results[polynomial] = mosaic
+    return results, False
+
+
+def catalog_file(in_file: Path, out_dir: Path) -> tuple[list[Knot_Result], int]:
+    """Finds all unique knots """
+    # list of knot IDs we found already
+    knot_list: list[str] = []
+    results: list[Knot_Result] = []
+
+    # keep track of how many we've parsed
+    line_ct = 0
+    # iterating over each line in each file in the dir
+    print(f".. starting {in_file}")
+    start_t = time()
+    with in_file.open("r") as f:
+        for mosaic_str in f:
+            mosaic_str = mosaic_str.strip()
+            line_ct += 1
+
+            knot = identify_mosaic(mosaic_str)
+
+            if (knot is None):  # rules out like 40k
+                continue
+
+            new_knot = knot.simplify()  # probably expensive?
+            if new_knot:
+                knot = new_knot
+
+            polynomial = str(knot.homfly_polynomial())  # probably expensive
+
+            if polynomial in knot_list:  # rules out  40k
+                continue
+
+            # runs ~10x
+            knot_list.append(polynomial)
+
+            # knotid = str(knot.get_knotinfo())
+            results.append(Knot_Result(mosaic_str, polynomial))
+
+    d_time = time()-start_t
+    outfile = out_dir / in_file.name
+    with outfile.open("w") as out:
+        [out.write(f"{r.mosaic_str},{r.polynomial}\n") for r in results]
+        out.write("END_RESULT")
+
+    print(
+        f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s ({line_ct/d_time:.0f} lines/s)")
+    return results, line_ct
 
 
 def identify_mosaic(mosaic_string) -> Link | None:
@@ -197,11 +297,11 @@ def identify_mosaic(mosaic_string) -> Link | None:
                 if pd_codes[-1][l] == strand_number:
                     pd_codes[-1][l] = 1
                     break
-            return Link(pd_codes).remove_loops()
+            return Link(pd_codes)
 
 
 def count_crossings(mosaic: list[int]) -> int:
-    return len([tile for tile in mosaic if tile in [10, 11]])
+    return len([tile for tile in mosaic if tile in [9, 10]])
 
 
 def gen_png(mosaic_str: str, homfly: str, id: str, img_path: Path):
