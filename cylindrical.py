@@ -1,61 +1,84 @@
+#! /usr/bin/env python
 import argparse
-from collections import namedtuple
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing import Pool
-import os
 from pathlib import Path
 import textwrap
+import threading
 from matplotlib import pyplot as plt
 import mosaic_tools as mtool
 from typing import Any
-from time import time
+from time import sleep, time
 
 # sage doesn't have type support ¯\_(ツ)_/¯
 from sage.all import Link, SR  # type:ignore
 
+win_proj: Path = Path("/mnt/c/Users/westn/Documents/code/knot-mosaics")
+
 
 def main():
     parser = argparse.ArgumentParser()
+    subs = parser.add_subparsers(help="mode to run in", required=True)
     parser.add_argument(
-        '-i', '--images', help='Print image', action='store_true')
-    parser.add_argument('-s', '--string', metavar='<mosaic string>',
-                        help='Determine knot type from string')
-    parser.add_argument(
-        '-d', '--directory', help='Create knot catalog from directory of mosaic lists')
-    parser.add_argument(
-        '-m', '--merge', help='merge result files with this ID string')
-    args = parser.parse_args()
+        '-i', '--images', help='Generate images', action='store_true')
 
-    if args.images:
-        img = mtool.to_img(mtool.string2matrix(args.string))
-        path = Path("output/other_img")/f"{args.string}.png"
-        img.save(path)
-        print(f"saved to {path}")
+    string = subs.add_parser("string", help="Parse a single string")
+    string.add_argument('string', help='Determine knot type from string')
+    string.set_defaults(func=handle_str)
+
+    dir = subs.add_parser("dir",
+                          help='parse mosiacs in dir corresponding to this ID')
+    dir.add_argument('id', help='parse folder of mosaic lists')
+    dir.set_defaults(func=handle_dirs)
+
+    merge = subs.add_parser(
+        'merge', help='merge result files with this ID string')
+    merge.add_argument('id', help='folder name in output & data')
+    merge.set_defaults(func=handle_merge)
+
+    file = subs.add_parser('file', help="parse single file")
+    file.add_argument('input_file', help="path of file to parse", type=Path)
+    file.add_argument(
+        'output_file', help="path to ouput results to", type=Path)
+    file.set_defaults(func=handle_file)
+    args = parser.parse_args()
+    args.func(args)
+
+
+def handle_dirs(args):
+    inp_dir = Path(f"data/{args.id}")
+    out_dir = Path(f"output/{args.id}_raw")
+    run_catalog(inp_dir, out_dir)
+
+
+def handle_merge(args):
+    combine_results(args.merge)
+
+
+def handle_str(args):
+    mosaic_str = args.string
+    knot = parse_mosaic(mosaic_str)
+    if type(knot) is str:
+        print(f"Bad Mosaic: {mosaic_str}")
         return
 
-    if args.string is not None:
-        mosaic_str = args.string
-        knot = identify_mosaic(mosaic_str)
-        if not knot or not knot.is_knot():
-            print("Mosaic is not a knot")
-            return
+    if not knot or not knot.is_knot():  # type:ignore
+        print("Mosaic is not a knot")
+        return
         # knot = knot.simplify(exhaustive=True, height=3)
-        knot = knot.simplify()
-        knotinfo = str(knot.get_knotinfo())
-        polynomial = str(knot.homfly_polynomial())
-        print(f"{mosaic_str} || {knotinfo} || {polynomial}")
+    knot = knot.simplify()  # type: ignore
+    knotinfo = str(knot.get_knotinfo())
+    polynomial = str(knot.homfly_polynomial())
+    print(f"{mosaic_str} || {knotinfo} || {polynomial}")
 
-        img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
-        gen_png(mosaic_str, polynomial, knotinfo, img_path)
+    img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
+    gen_png(mosaic_str, polynomial, knotinfo, img_path)
 
-    if args.directory is not None:
-        inp_dir = Path(args.directory)
-        out_dir = Path("output")/(inp_dir.stem+"_raw")
 
-        catalog_raw(inp_dir, out_dir)
-    if args.merge is not None:
-        combine_results(args.merge)
+def handle_file(args):
+    catalog_file(args.input_file, args.output_file)
 
 
 @dataclass
@@ -64,32 +87,67 @@ class Knot_Result:
     polynomial: str
 
 
-def catalog_raw(inp_dir: Path, out_dir: Path):
+def run_catalog(inp_dir: Path, out_dir: Path):
+    """Uses multiple processes to parse through a directory of mosaic files"""
+    with ProcessPoolExecutor(max_workers=6) as executor:
+        i = 0
 
-    t_start = time()
+        # Thread to wait for user input without blocking main tasks
+        stop_event = threading.Event()  # will be set by keypress thread
 
-    # files = [inp_dir/f"pt{ind}.txt" for ind in range(400)]
-    files = [f for f in inp_dir.iterdir() if f.is_file()]
-    # filter out files which already have a calculated result
-    files = [f for f in files if not (out_dir/f.name).is_file()]
+        def wait_for_key():
+            input()
+            print("stopping...", flush=True)
+            stop_event.set()
+        print("Press Enter to stop submitting new tasks...\n")
+        threading.Thread(target=wait_for_key, daemon=True).start()
 
-    print(f"Parsing {len(files)} files...")
-    with Pool(6, maxtasksperchild=4) as pool:
-        pool.map(partial(catalog_file, out_dir=out_dir), files)
-    dt = time()-t_start
-    # print(f"{tot_ct} mosiacs parsed in {dt:.0f}s: {tot_ct/dt:.0f} moaics/sec")
+        max_queue = 8
+        futures: dict[Future, int] = {}
+        while True:
+            if stop_event.is_set():
+                break
+
+            done = [res for res in futures.keys() if res.done()]
+            for res in done:
+                ind = futures.pop(res)
+                print(f"Result {ind} done", flush=True)
+
+            # [print("res:", r.result()) for r in done]
+            if len(futures) < max_queue:
+                in_path = inp_dir / f"pt{i}.txt"
+                out_path = out_dir / f"pt{i}.txt"
+                i += 1
+
+                if out_path.is_file():
+                    # TODO: this should maybe check for end_flag?
+                    continue
+                if not in_path.is_file():
+                    break
+                print(f"Queued {in_path}", flush=True)
+                fut = executor.submit(
+                    catalog_file, in_path, out_path)
+                futures[fut] = i-1
+            else:
+                sleep(1)
+
+        print("waiting for current workers to finish...", flush=True)
+        [print(f"Working on: {i}, running={fut.running()}") for fut, i in futures.items()]
+        executor.shutdown(wait=True, cancel_futures=True)
+        print("fully shutdown now")
+        # [print("res:", r.result()) for r in futures if not r.cancelled()]
     return
 
 
-def combine_results(path_id:str):
+def combine_results(path_id: str):
     all_results: dict[str, str] = {}
-    
+
     raw_results = Path(f"output/{path_id}_raw")
     for file in raw_results.iterdir():
         results, complete = load_result_file(file)
         if not complete:
             print(f"{file} is incomplete")
-        
+
         for polynomial, mosaic in results.items():
             if polynomial not in all_results:
                 all_results[polynomial] = mosaic
@@ -100,15 +158,16 @@ def combine_results(path_id:str):
     out_file = Path(f"output/{path_id}_results.txt")
     with out_file.open("w") as out:
         for polynomial, mosaic_str in all_results.items():
-            knot = identify_mosaic(mosaic_str)
-            if knot is None:
+            # yes, I'm re-running the ID/simplify steps. But the alternative is to run knotID on all the result files...
+            knot = parse_mosaic(mosaic_str)
+            if knot is None or type(knot) is str:
                 print("ERR: should not be null knots in final results")
                 break
-            new_knot = knot.simplify()
+            new_knot = knot.simplify()  # type: ignore
             if new_knot is not None:
                 knot = new_knot
-            
-            knotid = str(knot.get_knotinfo(unique=False))
+
+            knotid = str(knot.get_knotinfo(unique=False))  # type: ignore
             polynomial = str(SR(polynomial))
             img_path = img_dir / (mosaic_str+".png")
             gen_png(mosaic_str, polynomial, knotid, img_path)
@@ -129,7 +188,7 @@ def load_result_file(file: Path) -> tuple[dict[str, str], bool]:
     return results, False
 
 
-def catalog_file(in_file: Path, out_dir: Path) -> tuple[list[Knot_Result], int]:
+def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]:
     """Finds all unique knots """
     # list of knot IDs we found already
     knot_list: list[str] = []
@@ -138,23 +197,33 @@ def catalog_file(in_file: Path, out_dir: Path) -> tuple[list[Knot_Result], int]:
     # keep track of how many we've parsed
     line_ct = 0
     # iterating over each line in each file in the dir
-    print(f".. starting {in_file}")
+    print(f"Starting {in_file}", flush=True)
     start_t = time()
+    bad_mosaics: list[str] = []
+    links: list[str] = []
     with in_file.open("r") as f:
         for mosaic_str in f:
             mosaic_str = mosaic_str.strip()
             line_ct += 1
 
-            knot = identify_mosaic(mosaic_str)
+            knot = parse_mosaic(mosaic_str)
+            # print(f"ID'd {line_ct}")
 
+            if (type(knot) is str):  # rules out like 40k
+                bad_mosaics.append(f"{mosaic_str}\n")
+                continue
             if (knot is None):  # rules out like 40k
+                links.append(f"{mosaic_str}\n")
                 continue
 
-            new_knot = knot.simplify()  # probably expensive?
+            new_knot = knot.simplify()  # type: ignore # probably expensive?
             if new_knot:
                 knot = new_knot
+            # print(f"Simp {line_ct}")
 
-            polynomial = str(knot.homfly_polynomial())  # probably expensive
+            # type: ignore # probably expensive
+            polynomial = str(knot.homfly_polynomial()) # type: ignore
+            # print(f"Poly {line_ct}")
 
             if polynomial in knot_list:  # rules out  40k
                 continue
@@ -166,17 +235,23 @@ def catalog_file(in_file: Path, out_dir: Path) -> tuple[list[Knot_Result], int]:
             results.append(Knot_Result(mosaic_str, polynomial))
 
     d_time = time()-start_t
-    outfile = out_dir / in_file.name
-    with outfile.open("w") as out:
+    # with (win_proj / "bad_mosaics.txt").open('a') as file:
+    #     file.writelines(bad_mosaics)
+    # with (win_proj / "links.txt").open('w') as file:
+    #     file.writelines(links)
+    if len(bad_mosaics):
+        print(f"Bad Mosaics in {in_file}", flush=True)
+    with out_file.open("w") as out:
         [out.write(f"{r.mosaic_str},{r.polynomial}\n") for r in results]
         out.write("END_RESULT")
 
     print(
-        f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s ({line_ct/d_time:.0f} lines/s)")
+        f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s ({line_ct/d_time:.0f} lines/s)", flush=True)
     return results, line_ct
 
 
-def identify_mosaic(mosaic_string) -> Link | None:
+def parse_mosaic(mosaic_string) -> Link | str | None:
+    """Parses mosaic, returning a valid knot, the string if it crashes, or none if it's an invalid knot"""
     size = int(len(mosaic_string)**(0.5))
     # ASK: why initialize to 10? isn't this a crossing?
     mosaic = [[10]*(size**2)]
@@ -218,7 +293,13 @@ def identify_mosaic(mosaic_string) -> Link | None:
     curr_tile = mosaic[layer][tile_index]
     face = valid_connections[curr_tile][0][0]  # type: ignore
     not_looped = True
+    loop_ct = 0
     while not_looped:
+        loop_ct += 1
+        if loop_ct > 100_000:
+            # TODO: this is a nasty hack and shouldn't stay
+            return mosaic_string
+
         curr_tile = mosaic[layer][tile_index]
         for conn in valid_connections[curr_tile]:
             if conn[0] == face:

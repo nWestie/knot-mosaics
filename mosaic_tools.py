@@ -124,7 +124,7 @@ class ImageBrowser(tk.Tk):
         h = self.image_label.winfo_height()
         if w > 1 and h > 1:
             img = img.copy()
-            img.thumbnail((w, h), Image.LANCZOS)
+            img.thumbnail((w, h), Image.LANCZOS) # type: ignore
         return img
 
 
