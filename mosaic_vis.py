@@ -5,17 +5,42 @@ from tkinter import font
 from typing import Callable
 from PIL import Image, ImageTk
 from tkinter.filedialog import askopenfilename
+from matplotlib import pyplot as plt
 
-# ---- DOES NOT run well in WSL2 (text doesn't scale) ----
-
-
-def string2matrix(string: str) -> list[int]:
-    """convert each char in the string to an int, 
-    using hex conversion to properly convert 'a' to 11 """
-    return [int(elem, base=16) for elem in string]
+from mosaics import *
 
 
-def to_img(mosaic_tiles: list[int]) -> Image.Image:
+def gen_png(mosaic_str: str, id: str, img_path: Path):
+    """Builds a PNG with metadata shown above/below mosaic"""
+    matrix = string2matrix(mosaic_str)
+    img = build_img(matrix)
+
+    dpi: int = 300
+
+    fig, ax = plt.subplots(nrows=2, figsize=(6, 7), gridspec_kw={
+                           "height_ratios": [6, 1]}, dpi=dpi)
+
+    # ---- Image ----
+    ax[0].imshow(img)
+    ax[0].axis("off")
+    ax[0].set_title(f"{mosaic_str}", fontsize=14, pad=10)
+
+    # ---- Function text ----
+    ax[1].axis("off")
+    ax[1].text(0.5, 0.5, f"ID: {id} Tile #: {count_tiles(mosaic_str)}", ha="center", va="center",
+               fontsize=16, wrap=True,)
+
+    plt.tight_layout()
+    plt.savefig(img_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def build_img(mosaic_tiles: list[int]) -> Image.Image:
+    """Builds a PIL image from a set of mosaic tiles"""
+    if not hasattr(build_img, "tiles"):
+        build_img.tiles = load_tile_imgs()
+
+    tiles = build_img.tiles
     tile_size = tiles[0].width
     # border_size = 4
     # border_color = (196, 196, 196, 255)
@@ -38,7 +63,7 @@ def to_img(mosaic_tiles: list[int]) -> Image.Image:
     return out_img
 
 
-def load_tile_imgs(hi_res=False)->dict[int,Image.Image]:
+def load_tile_imgs(hi_res=False) -> dict[int, Image.Image]:
     tile_images = {}
     for num in range(11):
         file_name = f"tiles/{"hi-res/" if hi_res else ""}{num}.png"
@@ -46,9 +71,11 @@ def load_tile_imgs(hi_res=False)->dict[int,Image.Image]:
             tile_images[num] = Image.open(file_name).convert("RGBA")
         except FileNotFoundError:
             print(f"Failed to load image {file_name}")
+            exit(-1)
     return tile_images
 
 
+# ---- DOES NOT run well in WSL2 (text doesn't scale) ----
 class ImageBrowser(tk.Tk):
     def __init__(self, image_names: list[str], getter):
         super().__init__()
@@ -130,23 +157,25 @@ class ImageBrowser(tk.Tk):
             img.thumbnail((w, h), Image.LANCZOS)  # type: ignore
         return img
 
+    @classmethod
+    def from_img_folder(cls, dir: Path):
+        def getter(mosaic):
+            return Image.open(dir / f"{mosaic}.png")
+        mosaics = [p.stem for p in dir.iterdir()]
+        return ImageBrowser(mosaics, getter)
 
-tiles = load_tile_imgs(hi_res=True)
+    @classmethod
+    def from_mosaic_file(cls, file: Path):
+        with open(file) as f:
+            mosaics = [l.strip() for l in f.readlines()]
+
+        def getter(mosaic: str):
+            return build_img(string2matrix(mosaic))
+        return ImageBrowser(mosaics, getter)
 
 
 if __name__ == "__main__":
-    # folder = Path("data/5_cyl_imgs")
-    # def getter(mosaic):
-    #     return Image.open(folder / f"{mosaic}.png")
-    # mosaics = [p.stem for p in folder.iterdir()]
-    file = askopenfilename(initialdir=".")
+    file = Path(askopenfilename(initialdir="."))
     if not file:
         exit()
-    with open(file) as f:
-        mosaics = [l.strip() for l in f.readlines()]
-
-    def getter(mosaic: str):
-        mosaic = mosaic.split("-")[-1]
-        return to_img(string2matrix(mosaic))
-
-    ImageBrowser(mosaics, getter).mainloop()
+    ImageBrowser.from_mosaic_file(file).mainloop()

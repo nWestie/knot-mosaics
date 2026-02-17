@@ -8,20 +8,35 @@ from pathlib import Path
 import textwrap
 import threading
 from matplotlib import pyplot as plt
-import mosaic_tools as mtool
+import mosaic_vis as mtool
 from typing import Any
 from time import sleep, time
+import mosaics as m
+import mosaic_vis as mvis
 
 # sage doesn't have type support ¯\_(ツ)_/¯
 from sage.all import Link, SR  # type:ignore
 
 
+output_dir = Path(f"output/")
 def mosaic_dir(id): return Path(f"data/{id}")
 def results_dir(id): return Path(f"data/{id}_res")
-
-
-output_dir = Path(f"output/")
 def img_dir(id): return output_dir / f"{id}_imgs"
+
+
+@dataclass
+class Knot_Result:
+    mosaic_str: str
+    tile_ct: int
+    polynomial: str
+
+    def to_str(self) -> str:
+        return f"{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
+
+    @classmethod
+    def from_str(cls, str: str):
+        parts = str.strip().split("|")
+        return Knot_Result(parts[0], int(parts[1]), parts[2])
 
 
 def main():
@@ -68,43 +83,8 @@ def handle_merge(args):
     combine_results(args.id)
 
 
-def handle_str(args):
-    mosaic_str = args.string
-    knot = parse_mosaic(mosaic_str)
-    if type(knot) is str:
-        print(f"Bad Mosaic: {mosaic_str}")
-        return
-
-    if not knot or not knot.is_knot():  # type:ignore
-        print("Mosaic is not a knot")
-        return
-        # knot = knot.simplify(exhaustive=True, height=3)
-    knot = knot.simplify()  # type: ignore
-    knotinfo = str(knot.get_knotinfo())
-    polynomial = str(knot.homfly_polynomial())
-    print(f"{mosaic_str} || {knotinfo} || {polynomial}")
-
-    img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
-    gen_png(mosaic_str, knotinfo, img_path)
-
-
 def handle_file(args):
     catalog_file(args.input_file, args.output_file)
-
-
-@dataclass
-class Knot_Result:
-    mosaic_str: str
-    tile_ct: int
-    polynomial: str
-
-    def to_str(self) -> str:
-        return f"{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
-
-    @classmethod
-    def from_str(cls, str: str):
-        parts = str.strip().split("|")
-        return Knot_Result(parts[0], int(parts[1]), parts[2])
 
 
 def run_catalog(inp_dir: Path, out_dir: Path):
@@ -158,7 +138,7 @@ def run_catalog(inp_dir: Path, out_dir: Path):
                 futures[fut] = i-1
             else:
                 sleep(1)
-        
+
         print("waiting for current workers to finish...", flush=True)
         [print(f"Working on: {i}, running={fut.running()}")
          for fut, i in futures.items()]
@@ -194,7 +174,7 @@ def combine_results(path_id: str):
     for polynomial, res in all_results.items():
         # yes, I'm re-running the ID/simplify steps.
         # But the alternative is to run knotID on all the result files...
-        knot = parse_mosaic(res.mosaic_str)
+        knot = m.parse_mosaic(res.mosaic_str)
         if knot is None or type(knot) is str:
             print("ERR: should not be null knots in final results")
             break
@@ -207,7 +187,7 @@ def combine_results(path_id: str):
             knotid = knotid.replace(s, "")
         knot_ids.append((knotid, polynomial))
         img_path = imgs / (f"{knotid}__{res.mosaic_str}.png")
-        gen_png(res.mosaic_str, knotid, img_path)
+        mvis.gen_png(res.mosaic_str, knotid, img_path)
         print(f"saved {img_path}")
     # generate output file
     knot_ids.sort(key=lambda k: k[0])
@@ -248,7 +228,7 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
             mosaic_str = mosaic_str.strip()
             line_ct += 1
 
-            knot = parse_mosaic(mosaic_str)
+            knot = m.parse_mosaic(mosaic_str)
             # print(f"ID'd {line_ct}")
 
             if (type(knot) is str):  # rules out like 40k
@@ -264,7 +244,7 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
             # print(f"Simp {line_ct}")
 
             polynomial = str(knot.homfly_polynomial())  # type: ignore
-            tile_ct = count_tiles(mosaic_str)
+            tile_ct = m.count_tiles(mosaic_str)
 
             prev_best = knot_bank.get(polynomial)  # rules out  40k
             # this is safe because of short-circuit 'or' eval
@@ -288,184 +268,24 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
     return list(knot_bank.values()), line_ct
 
 
-def parse_mosaic(mosaic_string) -> Link | str | None:
-    """Parses mosaic, returning a valid knot, the string if it crashes, or none if it's an invalid knot"""
-    size = int(len(mosaic_string)**(0.5))
-    # ASK: why initialize to 10? isn't this a crossing?
-    mosaic = [[10]*(size**2)]
-    mosaic.append([0]*(size**2))
-    satisfied: list[list[bool]] = [[False]*(size ** 2)]
-    # THIS CHANGED - used to be mirred between both layers
-    satisfied.append([False]*(size**2))
-    crossing_strands = [
-        [[0]*4 for _ in range((size ** 2))] for _ in range(2)]
+def handle_str(args):
+    mosaic_str = args.string
+    knot = m.parse_mosaic(mosaic_str)
+    if type(knot) is str:
+        print(f"Bad Mosaic: {mosaic_str}")
+        return
 
-    made_connections = [[[] for _ in range(size ** 2)] for _ in range(2)]
-    crossing_indices = []
-    pd_codes: list[list[int]] = []
-    # Layer 0 "front", 1 holds hidden crossings
-    tile_index = layer = face = 0
-    strand_number = 1
+    if not knot or not knot.is_knot():  # type:ignore
+        print("Mosaic is not a knot")
+        return
+        # knot = knot.simplify(exhaustive=True, height=3)
+    knot = knot.simplify()  # type: ignore
+    knotinfo = str(knot.get_knotinfo())
+    polynomial = str(knot.homfly_polynomial())
+    print(f"{mosaic_str} || {knotinfo} || {polynomial}")
 
-    for i, char in enumerate(mosaic_string.strip()):
-        num = int(char, base=16)
-        mosaic[0][i] = num
-        satisfied[0][i] = (num == 0)
-
-    # move index to start on the first non-zero tile
-    while mosaic[0][tile_index] == 0:
-        tile_index += 1
-
-    for i in range(size):
-        # iterating through left side
-        if mosaic[0][i*size] > 6 or mosaic[0][i*size] in (1, 4, 5):
-            for j in range(size):
-                # ASK: adding 5 to the whole row? Other one adds 6 if it is on top edge?
-                mosaic[1][i*size + j] += 5
-        # iterating through top row edge?
-        if mosaic[0][i] > 6 or mosaic[0][i] in (3, 4, 6):
-            for j in range(size):
-                mosaic[1][(j+1)*size - (i+1)] += 6
-
-    # curr_tile always starts at a non-zero tile, so this never errs
-    curr_tile = mosaic[layer][tile_index]
-    face = valid_connections[curr_tile][0][0]  # type: ignore
-    not_looped = True
-    loop_ct = 0
-    while not_looped:
-        loop_ct += 1
-        if loop_ct > 10_000:
-            # TODO: this is a nasty hack and shouldn't stay
-            return mosaic_string
-
-        curr_tile = mosaic[layer][tile_index]
-        for conn in valid_connections[curr_tile]:
-            if conn[0] == face:
-                if conn in made_connections[layer][tile_index]:
-                    not_looped = False
-                    break  # break for & while
-
-                made_connections[layer][tile_index].append(conn)
-                if ((len(made_connections[layer][tile_index]) == 1) and curr_tile < 7) or (len(made_connections[layer][tile_index]) == 2):
-                    # If the tile has all the connections it needs, we're done
-                    satisfied[layer][tile_index] = True
-
-                # Crossing logic
-                if curr_tile > 8:  # if it is a crossing
-                    if satisfied[layer][tile_index]:
-                        crossing_indices.append([layer, tile_index])
-                    crossing_strands[layer][tile_index][face] = strand_number
-                    strand_number += 1
-                    crossing_strands[layer][tile_index][(
-                        face + 2) % 4] = strand_number
-                else:
-                    face = (conn[1] + 2) % 4
-
-                # Go to next tile
-                if face == 0:  # left
-                    if tile_index % size == 0:
-                        layer = (layer + 1) % 2
-                        tile_index = size*((tile_index//size) + 1) - 1
-                    else:
-                        tile_index -= 1
-                elif face == 1:  # down
-                    if (tile_index // size) == size - 1:
-                        layer = (layer + 1) % 2
-                        tile_index = size**2 - (tile_index % size + 1)
-                        face = 3
-                    else:
-                        tile_index += size
-                elif face == 2:  # right
-                    if tile_index % size == size - 1:
-                        layer = (layer + 1) % 2
-                        tile_index = size*(tile_index // size)
-                    else:
-                        tile_index += 1
-                elif face == 3:  # up
-                    if tile_index // size == 0:
-                        layer = (layer + 1) % 2
-                        tile_index = size - (tile_index + 1)
-                        face = 1
-                    else:
-                        tile_index -= size
-                break
-    # This is pretty much a completely different phase of the func
-    # assume it's the part that actually figures out what knot it is?
-    if all(satisfied[0]):
-        if len(crossing_indices) < 3:
-            # Must be the unknot if there's less than 3 crossings
-            homf = 1
-        else:
-            for i0, i1 in crossing_indices:
-                if mosaic[i0][i1] == 9:
-                    if (0, 2) in made_connections[i0][i1]:
-                        pd_codes.append(
-                            crossing_strands[i0][i1])
-                    else:
-                        # Rotated by 2
-                        pd_codes.append(
-                            crossing_strands[i0][i1][2:] + crossing_strands[i0][i1][:2])
-                else:
-                    if (1, 3) in made_connections[i0][i1]:
-                        pd_codes.append(
-                            crossing_strands[i0][i1][1:] + crossing_strands[i0][i1][:1])
-                    else:
-                        pd_codes.append(
-                            crossing_strands[i0][i1][3:] + crossing_strands[i0][i1][:3])
-            for l in range(len(pd_codes[-1])):
-                if pd_codes[-1][l] == strand_number:
-                    pd_codes[-1][l] = 1
-                    break
-            return Link(pd_codes)
-
-
-def count_crossings(mosaic: list[int]) -> int:
-    return len([tile for tile in mosaic if tile in [9, 10]])
-
-
-def count_tiles(mosaic: str):
-    return len([tile for tile in mosaic if tile != '0'])
-
-
-def gen_png(mosaic_str: str, id: str, img_path: Path):
-
-    matrix = mtool.string2matrix(mosaic_str)
-    img = mtool.to_img(matrix)
-
-    dpi: int = 300
-
-    fig, ax = plt.subplots(nrows=2, figsize=(6, 7), gridspec_kw={
-                           "height_ratios": [6, 1]}, dpi=dpi)
-
-    # ---- Image ----
-    ax[0].imshow(img)
-    ax[0].axis("off")
-    ax[0].set_title(f"{mosaic_str}", fontsize=14, pad=10)
-
-    # ---- Function text ----
-    ax[1].axis("off")
-    ax[1].text(0.5, 0.5, f"ID: {id} Tile #: {count_tiles(mosaic_str)}", ha="center", va="center",
-               fontsize=16, wrap=True,)
-
-    plt.tight_layout()
-    plt.savefig(img_path, bbox_inches="tight")
-    plt.close(fig)
-
-
-valid_connections = (
-    (()),
-    ((2, 3), (3, 2)),
-    ((0, 3), (3, 0)),
-    ((0, 1), (1, 0)),
-    ((2, 1), (1, 2)),
-    ((2, 0), (0, 2)),
-    ((1, 3), (3, 1)),
-    ((2, 3), (3, 2), (1, 0), (0, 1)),
-    ((0, 3), (3, 0), (2, 1), (1, 2)),
-    ((0, 2), (1, 3), (2, 0), (3, 1)),
-    ((0, 2), (1, 3), (2, 0), (3, 1)),
-    ((0, 2), (1, 3), (2, 0), (3, 1))
-)
+    img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
+    mvis.gen_png(mosaic_str, knotinfo, img_path)
 
 
 if __name__ == "__main__":

@@ -8,17 +8,18 @@ from random import random
 import sys
 import threading
 from time import sleep
-import mosaic_tools as mtool
+import mosaic_vis as mtool
 import matplotlib.pyplot as plt
 from multiprocessing import Pool
 
 
 def show_str(mosaic: str):
     mat = mtool.string2matrix(mosaic)
-    img = mtool.to_img(mat)
+    img = mtool.build_img(mat)
     plt.imshow(img)
     plt.show()
 
 
 if __name__ == '__main__':
-    # show_str('100025512a12aaa5aa7754343')
+    show_str('100025512a12aaa5aa7754343')
+
