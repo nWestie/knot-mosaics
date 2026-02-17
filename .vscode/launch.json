@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "./cylindrical.py",
             "console": "integratedTerminal",
-            "args": "file data/5_cyl/pt7.txt tmp.txt", 
+            "args": "dir 5_cyl", 
         },
     ]
 }

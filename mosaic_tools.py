@@ -2,9 +2,12 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 from tkinter import font
+from typing import Callable
 from PIL import Image, ImageTk
+from tkinter.filedialog import askopenfilename
 
 # ---- DOES NOT run well in WSL2 (text doesn't scale) ----
+
 
 def string2matrix(string: str) -> list[int]:
     """convert each char in the string to an int, 
@@ -13,7 +16,7 @@ def string2matrix(string: str) -> list[int]:
 
 
 def to_img(mosaic_tiles: list[int]) -> Image.Image:
-    tile_size = 64
+    tile_size = tiles[0].width
     # border_size = 4
     # border_color = (196, 196, 196, 255)
     grid_size = int(len(mosaic_tiles)**0.5)
@@ -35,10 +38,10 @@ def to_img(mosaic_tiles: list[int]) -> Image.Image:
     return out_img
 
 
-def load_tile_imgs():
+def load_tile_imgs(hi_res=False)->dict[int,Image.Image]:
     tile_images = {}
     for num in range(11):
-        file_name = f"tiles/{num}.png"
+        file_name = f"tiles/{"hi-res/" if hi_res else ""}{num}.png"
         try:
             tile_images[num] = Image.open(file_name).convert("RGBA")
         except FileNotFoundError:
@@ -47,16 +50,17 @@ def load_tile_imgs():
 
 
 class ImageBrowser(tk.Tk):
-    def __init__(self, image_names, mosaic_type):
+    def __init__(self, image_names: list[str], getter):
         super().__init__()
 
         self.title("Image Browser")
-        self.geometry("900x600")
+        # self.geometry("900x600")
+        self.state('zoomed')
 
+        self.get_img = getter
         self.image_names: list[str] = image_names
         self.current_index = 0
         self.tk_image = None  # keep reference!
-        self.mosaic_type = mosaic_type
         self._build_ui()
 
         if self.image_names:
@@ -77,7 +81,7 @@ class ImageBrowser(tk.Tk):
             left_frame,
             yscrollcommand=scrollbar.set,
             activestyle="dotbox",
-            font=("TKDefaultFont", 20)
+            font=("TKDefaultFont", 16)
         )
         self.listbox.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.listbox.yview)
@@ -89,7 +93,7 @@ class ImageBrowser(tk.Tk):
 
         # ---- Right: Image display ----
         right_frame = ttk.Frame(paned)
-        paned.add(right_frame, weight=4)
+        paned.add(right_frame, weight=3)
 
         self.image_label = ttk.Label(right_frame, anchor="center")
         self.image_label.pack(fill=tk.BOTH, expand=True)
@@ -110,8 +114,7 @@ class ImageBrowser(tk.Tk):
         self.listbox.see(index)
 
         img_name = self.image_names[index]
-        mat = self.mosaic_type.string2matrix(img_name)
-        img = self.mosaic_type.to_img(mat, tiles)
+        img = self.get_img(img_name)
         # Optional resize to fit window
         img = self._resize_to_label(img)
 
@@ -124,19 +127,26 @@ class ImageBrowser(tk.Tk):
         h = self.image_label.winfo_height()
         if w > 1 and h > 1:
             img = img.copy()
-            img.thumbnail((w, h), Image.LANCZOS) # type: ignore
+            img.thumbnail((w, h), Image.LANCZOS)  # type: ignore
         return img
 
 
-def launch(images: list[str], mosaic_type):
-    ImageBrowser(images, mosaic_type).mainloop()
-
-tiles = load_tile_imgs()
+tiles = load_tile_imgs(hi_res=True)
 
 
 if __name__ == "__main__":
-    import cylindrical
-    file = Path("./data/3_crosses.txt")
-    mosaics = [line.strip() for line in file.open()]
+    # folder = Path("data/5_cyl_imgs")
+    # def getter(mosaic):
+    #     return Image.open(folder / f"{mosaic}.png")
+    # mosaics = [p.stem for p in folder.iterdir()]
+    file = askopenfilename(initialdir=".")
+    if not file:
+        exit()
+    with open(file) as f:
+        mosaics = [l.strip() for l in f.readlines()]
 
-    launch(mosaics, cylindrical)
+    def getter(mosaic: str):
+        mosaic = mosaic.split("-")[-1]
+        return to_img(string2matrix(mosaic))
+
+    ImageBrowser(mosaics, getter).mainloop()

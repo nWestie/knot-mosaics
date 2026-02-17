@@ -3,7 +3,7 @@ import argparse
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from functools import partial
-from multiprocessing import Pool
+from multiprocessing import current_process
 from pathlib import Path
 import textwrap
 import threading
@@ -14,8 +14,6 @@ from time import sleep, time
 
 # sage doesn't have type support ¯\_(ツ)_/¯
 from sage.all import Link, SR  # type:ignore
-
-win_proj: Path = Path("/mnt/c/Users/westn/Documents/code/knot-mosaics")
 
 
 def main():
@@ -84,11 +82,22 @@ def handle_file(args):
 @dataclass
 class Knot_Result:
     mosaic_str: str
+    tile_ct: int
     polynomial: str
+
+    def to_str(self) -> str:
+        return f"{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
+
+    @classmethod
+    def from_str(cls, str: str):
+        parts = str.strip().split("|")
+        return Knot_Result(parts[0], int(parts[1]), parts[2])
 
 
 def run_catalog(inp_dir: Path, out_dir: Path):
     """Uses multiple processes to parse through a directory of mosaic files"""
+
+    out_dir.mkdir(parents=True, exist_ok=True)
     with ProcessPoolExecutor(max_workers=6) as executor:
         i = 0
 
@@ -104,16 +113,21 @@ def run_catalog(inp_dir: Path, out_dir: Path):
 
         max_queue = 8
         futures: dict[Future, int] = {}
-        while True:
-            if stop_event.is_set():
-                break
-
-            done = [res for res in futures.keys() if res.done()]
+        while not stop_event.is_set():
+            # Printing status, consuming old results
+            min_ind = min(futures.values() or (0,))
+            done = [r for r in futures.keys() if r.done()]
+            if done:
+                print(f"Oldest running file: #{min_ind}", flush=True)
             for res in done:
                 ind = futures.pop(res)
-                print(f"Result {ind} done", flush=True)
+                exp = res.exception()
+                if exp:
+                    print(f"RESULT {ind} FAILS", flush=True)
+                else:
+                    print(f"Result {ind} done", flush=True)
 
-            # [print("res:", r.result()) for r in done]
+            # Queueing new files
             if len(futures) < max_queue:
                 in_path = inp_dir / f"pt{i}.txt"
                 out_path = out_dir / f"pt{i}.txt"
@@ -132,7 +146,8 @@ def run_catalog(inp_dir: Path, out_dir: Path):
                 sleep(1)
 
         print("waiting for current workers to finish...", flush=True)
-        [print(f"Working on: {i}, running={fut.running()}") for fut, i in futures.items()]
+        [print(f"Working on: {i}, running={fut.running()}")
+         for fut, i in futures.items()]
         executor.shutdown(wait=True, cancel_futures=True)
         print("fully shutdown now")
         # [print("res:", r.result()) for r in futures if not r.cancelled()]
@@ -190,14 +205,13 @@ def load_result_file(file: Path) -> tuple[dict[str, str], bool]:
 
 def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]:
     """Finds all unique knots """
-    # list of knot IDs we found already
-    knot_list: list[str] = []
-    results: list[Knot_Result] = []
+    # list of knot IDs we found already mapped to their tile number
+    knot_bank: dict[str, Knot_Result] = {}
 
     # keep track of how many we've parsed
     line_ct = 0
     # iterating over each line in each file in the dir
-    print(f"Starting {in_file}", flush=True)
+    print(f"Starting {in_file} on {current_process().name}", flush=True)
     start_t = time()
     bad_mosaics: list[str] = []
     links: list[str] = []
@@ -221,33 +235,28 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
                 knot = new_knot
             # print(f"Simp {line_ct}")
 
-            # type: ignore # probably expensive
-            polynomial = str(knot.homfly_polynomial()) # type: ignore
-            # print(f"Poly {line_ct}")
+            polynomial = str(knot.homfly_polynomial())  # type: ignore
+            tile_ct = count_tiles(mosaic_str)
 
-            if polynomial in knot_list:  # rules out  40k
-                continue
-
-            # runs ~10x
-            knot_list.append(polynomial)
-
-            # knotid = str(knot.get_knotinfo())
-            results.append(Knot_Result(mosaic_str, polynomial))
+            prev_best = knot_bank.get(polynomial)  # rules out  40k
+            # this is safe because of short-circuit 'or' eval
+            if prev_best is None or tile_ct < prev_best.tile_ct:
+                result: Knot_Result = Knot_Result(
+                    mosaic_str, tile_ct, polynomial)
+                knot_bank[polynomial] = result
 
     d_time = time()-start_t
     # with (win_proj / "bad_mosaics.txt").open('a') as file:
     #     file.writelines(bad_mosaics)
-    # with (win_proj / "links.txt").open('w') as file:
-    #     file.writelines(links)
     if len(bad_mosaics):
         print(f"Bad Mosaics in {in_file}", flush=True)
     with out_file.open("w") as out:
-        [out.write(f"{r.mosaic_str},{r.polynomial}\n") for r in results]
+        out.write("\n".join(r.to_str() for r in knot_bank.values()))
         out.write("END_RESULT")
 
-    print(
-        f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s ({line_ct/d_time:.0f} lines/s)", flush=True)
-    return results, line_ct
+    print(f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s" +
+          f" ({line_ct/d_time:.0f} lines/s)", flush=True)
+    return list(knot_bank.values()), line_ct
 
 
 def parse_mosaic(mosaic_string) -> Link | str | None:
@@ -296,7 +305,7 @@ def parse_mosaic(mosaic_string) -> Link | str | None:
     loop_ct = 0
     while not_looped:
         loop_ct += 1
-        if loop_ct > 100_000:
+        if loop_ct > 10_000:
             # TODO: this is a nasty hack and shouldn't stay
             return mosaic_string
 
@@ -383,6 +392,10 @@ def parse_mosaic(mosaic_string) -> Link | str | None:
 
 def count_crossings(mosaic: list[int]) -> int:
     return len([tile for tile in mosaic if tile in [9, 10]])
+
+
+def count_tiles(mosaic: str):
+    return len([tile for tile in mosaic if tile != '0'])
 
 
 def gen_png(mosaic_str: str, homfly: str, id: str, img_path: Path):
