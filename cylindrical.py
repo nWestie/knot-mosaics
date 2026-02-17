@@ -16,6 +16,14 @@ from time import sleep, time
 from sage.all import Link, SR  # type:ignore
 
 
+def mosaic_dir(id): return Path(f"data/{id}")
+def results_dir(id): return Path(f"data/{id}_res")
+
+
+output_dir = Path(f"output/")
+def img_dir(id): return output_dir / f"{id}_imgs"
+
+
 def main():
     parser = argparse.ArgumentParser()
     subs = parser.add_subparsers(help="mode to run in", required=True)
@@ -29,6 +37,8 @@ def main():
     dir = subs.add_parser("dir",
                           help='parse mosiacs in dir corresponding to this ID')
     dir.add_argument('id', help='parse folder of mosaic lists')
+    dir.add_argument('-m', '--merge-also', action='store_true',
+                     help='also run merge after parsing')
     dir.set_defaults(func=handle_dirs)
 
     merge = subs.add_parser(
@@ -46,13 +56,16 @@ def main():
 
 
 def handle_dirs(args):
-    inp_dir = Path(f"data/{args.id}")
-    out_dir = Path(f"output/{args.id}_raw")
-    run_catalog(inp_dir, out_dir)
+    id = args.id
+    run_catalog(mosaic_dir(id), results_dir(id))
+    print(args)
+    if args.merge_also:
+        print("Merging...", flush=True)
+        handle_merge(args)
 
 
 def handle_merge(args):
-    combine_results(args.merge)
+    combine_results(args.id)
 
 
 def handle_str(args):
@@ -72,7 +85,7 @@ def handle_str(args):
     print(f"{mosaic_str} || {knotinfo} || {polynomial}")
 
     img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
-    gen_png(mosaic_str, polynomial, knotinfo, img_path)
+    gen_png(mosaic_str, knotinfo, img_path)
 
 
 def handle_file(args):
@@ -109,7 +122,8 @@ def run_catalog(inp_dir: Path, out_dir: Path):
             print("stopping...", flush=True)
             stop_event.set()
         print("Press Enter to stop submitting new tasks...\n")
-        threading.Thread(target=wait_for_key, daemon=True).start()
+        key_thread = threading.Thread(target=wait_for_key, daemon=True)
+        key_thread.start()
 
         max_queue = 8
         futures: dict[Future, int] = {}
@@ -144,7 +158,7 @@ def run_catalog(inp_dir: Path, out_dir: Path):
                 futures[fut] = i-1
             else:
                 sleep(1)
-
+        
         print("waiting for current workers to finish...", flush=True)
         [print(f"Working on: {i}, running={fut.running()}")
          for fut, i in futures.items()]
@@ -155,57 +169,71 @@ def run_catalog(inp_dir: Path, out_dir: Path):
 
 
 def combine_results(path_id: str):
-    all_results: dict[str, str] = {}
+    """ Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
+    # maps polynomial to knot result
+    all_results: dict[str, Knot_Result] = {}
 
-    raw_results = Path(f"output/{path_id}_raw")
-    for file in raw_results.iterdir():
+    # merge results, keeping lowest tile number
+    results_folder = results_dir(path_id)
+    for file in results_folder.iterdir():
         results, complete = load_result_file(file)
         if not complete:
             print(f"{file} is incomplete")
+        for r in results:
+            prev_best = all_results.get(r.polynomial)
+            # this is safe because of short-circuit 'or' eval
+            if prev_best is None or r.tile_ct < prev_best.tile_ct:
+                all_results[r.polynomial] = r
 
-        for polynomial, mosaic in results.items():
-            if polynomial not in all_results:
-                all_results[polynomial] = mosaic
-
+    # generate images
     print("writing file and images...")
-    img_dir = Path(f"output/{path_id}_imgs")
-    img_dir.mkdir(parents=True, exist_ok=True)
-    out_file = Path(f"output/{path_id}_results.txt")
+    imgs = img_dir(path_id)
+    imgs.mkdir(parents=True, exist_ok=True)
+    # tuples of (knotID, polynomial)
+    knot_ids: list[tuple[str, str]] = []
+    for polynomial, res in all_results.items():
+        # yes, I'm re-running the ID/simplify steps.
+        # But the alternative is to run knotID on all the result files...
+        knot = parse_mosaic(res.mosaic_str)
+        if knot is None or type(knot) is str:
+            print("ERR: should not be null knots in final results")
+            break
+        new_knot = knot.simplify()  # type: ignore
+        if new_knot is not None:
+            knot = new_knot
+
+        knotid = str(knot.get_knotinfo(unique=False))  # type: ignore
+        for s in ["KnotInfo", '[', ']', "'"]:
+            knotid = knotid.replace(s, "")
+        knot_ids.append((knotid, polynomial))
+        img_path = imgs / (f"{knotid}__{res.mosaic_str}.png")
+        gen_png(res.mosaic_str, knotid, img_path)
+        print(f"saved {img_path}")
+    # generate output file
+    knot_ids.sort(key=lambda k: k[0])
+    out_file = output_dir / f"{path_id}_results.txt"
     with out_file.open("w") as out:
-        for polynomial, mosaic_str in all_results.items():
-            # yes, I'm re-running the ID/simplify steps. But the alternative is to run knotID on all the result files...
-            knot = parse_mosaic(mosaic_str)
-            if knot is None or type(knot) is str:
-                print("ERR: should not be null knots in final results")
-                break
-            new_knot = knot.simplify()  # type: ignore
-            if new_knot is not None:
-                knot = new_knot
-
-            knotid = str(knot.get_knotinfo(unique=False))  # type: ignore
-            polynomial = str(SR(polynomial))
-            img_path = img_dir / (mosaic_str+".png")
-            gen_png(mosaic_str, polynomial, knotid, img_path)
-            print(f"saved {img_path}")
-            out.write(
-                f"{mosaic_str} || {knotid} || {polynomial}\n")
+        for id, poly in knot_ids:
+            res = all_results[poly]
+            out.write(f"{id} : {res.mosaic_str} : {str(SR(poly))}\n")
 
 
-def load_result_file(file: Path) -> tuple[dict[str, str], bool]:
-    results = {}
+def load_result_file(file: Path) -> tuple[list[Knot_Result], bool]:
+    """Extracts knot results from file. Returns true if file contains the correct end-indicator"""
+    results: list[Knot_Result] = []
     with file.open("r") as inp:
         for line in inp:
             # If this line is not present, indicates an interruption during writing.
-            if line.strip() == "END_RESULT":
+            line = line.strip()
+            if line == "END_RESULT":
                 return results, True
-            mosaic, polynomial = [p.strip() for p in line.split(",")]
-            results[polynomial] = mosaic
+            results.append(Knot_Result.from_str(line))
     return results, False
 
 
 def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]:
     """Finds all unique knots """
-    # list of knot IDs we found already mapped to their tile number
+    # maps polynomial to tile number/mosaic
     knot_bank: dict[str, Knot_Result] = {}
 
     # keep track of how many we've parsed
@@ -251,8 +279,9 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
     if len(bad_mosaics):
         print(f"Bad Mosaics in {in_file}", flush=True)
     with out_file.open("w") as out:
-        out.write("\n".join(r.to_str() for r in knot_bank.values()))
-        out.write("END_RESULT")
+        lines = [r.to_str() for r in knot_bank.values()]
+        out.write("\n".join(lines))
+        out.write("\nEND_RESULT")
 
     print(f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s" +
           f" ({line_ct/d_time:.0f} lines/s)", flush=True)
@@ -398,13 +427,12 @@ def count_tiles(mosaic: str):
     return len([tile for tile in mosaic if tile != '0'])
 
 
-def gen_png(mosaic_str: str, homfly: str, id: str, img_path: Path):
+def gen_png(mosaic_str: str, id: str, img_path: Path):
 
     matrix = mtool.string2matrix(mosaic_str)
     img = mtool.to_img(matrix)
 
     dpi: int = 300
-    func_text = textwrap.fill(f"${homfly}$", width=60)
 
     fig, ax = plt.subplots(nrows=2, figsize=(6, 7), gridspec_kw={
                            "height_ratios": [6, 1]}, dpi=dpi)
@@ -416,9 +444,7 @@ def gen_png(mosaic_str: str, homfly: str, id: str, img_path: Path):
 
     # ---- Function text ----
     ax[1].axis("off")
-    ax[1].text(0.5, 0.75, func_text, ha="center", va="center",
-               fontsize=16, wrap=True,)
-    ax[1].text(0.5, 0.25, f"ID: {id} Cross count: {count_crossings(matrix)}", ha="center", va="center",
+    ax[1].text(0.5, 0.5, f"ID: {id} Tile #: {count_tiles(mosaic_str)}", ha="center", va="center",
                fontsize=16, wrap=True,)
 
     plt.tight_layout()

@@ -21,4 +21,4 @@ def show_str(mosaic: str):
 
 
 if __name__ == '__main__':
-    show_str('100025512a12aaa5aa7754343')
+    # show_str('100025512a12aaa5aa7754343')

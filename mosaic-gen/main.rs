@@ -76,22 +76,13 @@ impl Mosaic {
 }
 
 fn main() -> Result<()> {
-    // let size: usize = Input::new()
-    // .with_prompt("Size of generated mosaics?")
-    // .interact_text()
-    // .unwrap();
-
-    // let output_path: String = Input::new()
-    //     .with_prompt("Path to Write Mosaics To?")
-    //     .interact_text()
-    //     .unwrap();
     
-    let size: usize = 5;
     // mosaics with <= this number of crossings will not be saved
     // for 5 crossings, we don't need anything <= 5
     // for 4 crossings, anything <=2
-    let discard_crossings: usize = 5;
-    let output_folder = "../data/pt_test";
+    let discard_crossings: usize = 0;
+    let size: usize = 4;
+    let output_folder = "../data/4_cyl_all";
     let max_lines = 50_000;
     create_dir_all(output_folder)?;
     let mut outbuf = RollingBufWriter::new(output_folder, max_lines)?;

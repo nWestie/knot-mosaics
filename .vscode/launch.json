@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "./cylindrical.py",
             "console": "integratedTerminal",
-            "args": "dir 5_cyl", 
+            "args": "merge 5_cyl", 
         },
     ]
 }
