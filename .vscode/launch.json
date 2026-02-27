@@ -23,9 +23,10 @@
             "name": "Py-Mosaics",
             "type": "debugpy",
             "request": "launch",
-            "program": "./cylindrical.py",
+            "program": "./main.py",
             "console": "integratedTerminal",
-            "args": "merge 5_cyl", 
+            // "args": "file data/4_cyl/pt0.txt tmpOut.txt", 
+            "args": "string 121297aa37a40340", 
         },
     ]
 }

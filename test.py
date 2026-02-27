@@ -11,8 +11,6 @@ from time import sleep
 import mosaic_vis as mtool
 import matplotlib.pyplot as plt
 from multiprocessing import Pool
-
-
 def show_str(mosaic: str):
     mat = mtool.string2matrix(mosaic)
     img = mtool.build_img(mat)

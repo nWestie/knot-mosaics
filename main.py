@@ -1,15 +1,11 @@
 #! /usr/bin/env python
 import argparse
-from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
-from functools import partial
 from multiprocessing import current_process
 from pathlib import Path
 import textwrap
 import threading
-from matplotlib import pyplot as plt
-import mosaic_vis as mtool
-from typing import Any
 from time import sleep, time
 import mosaics as m
 import mosaic_vis as mvis
@@ -72,8 +68,7 @@ def main():
 
 def handle_dirs(args):
     id = args.id
-    run_catalog(mosaic_dir(id), results_dir(id))
-    print(args)
+    run_catalog(mosaic_dir(id), results_dir(id),redo=True)
     if args.merge_also:
         print("Merging...", flush=True)
         handle_merge(args)
@@ -87,7 +82,7 @@ def handle_file(args):
     catalog_file(args.input_file, args.output_file)
 
 
-def run_catalog(inp_dir: Path, out_dir: Path):
+def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
     """Uses multiple processes to parse through a directory of mosaic files"""
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -127,8 +122,7 @@ def run_catalog(inp_dir: Path, out_dir: Path):
                 out_path = out_dir / f"pt{i}.txt"
                 i += 1
 
-                if out_path.is_file():
-                    # TODO: this should maybe check for end_flag?
+                if out_path.is_file() and not redo:
                     continue
                 if not in_path.is_file():
                     break
@@ -269,8 +263,9 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
 
 
 def handle_str(args):
-    mosaic_str = args.string
-    knot = m.parse_mosaic(mosaic_str)
+    mosaic_str: str = args.string
+    mosaic = m.NormMosaic.build_cylindrical(mosaic_str)
+    knot = m.traverse_mosaic(mosaic)
     if type(knot) is str:
         print(f"Bad Mosaic: {mosaic_str}")
         return
