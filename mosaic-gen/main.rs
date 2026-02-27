@@ -1,23 +1,32 @@
 #![allow(unused)]
 
-use dialoguer::Input;
-use std::collections::HashSet;
-use std::fs::{File, create_dir_all};
-use std::io::{BufWriter, Result, Write};
+use std::fs::create_dir_all;
+use std::io::Result;
 use std::time::Instant;
 mod conn_table;
 mod rolling_buff;
 use format_num::format_num;
 use rolling_buff::{RollOver, RollingBufWriter};
+
+#[derive(PartialEq)]
+enum MosaicVariant {
+    Flat,
+    Cylindrical,
+    Toric,
+    // Cubic,
+    // Mobius,
+}
 struct Mosaic {
     data: Vec<u8>,
     size: usize,
+    variant: MosaicVariant,
 }
 impl Mosaic {
     fn new(size: usize) -> Mosaic {
         Mosaic {
             data: vec![11; size * size],
             size,
+            variant: MosaicVariant::Cylindrical,
         }
     }
     fn crossing_ct(&self) -> usize {
@@ -42,41 +51,45 @@ impl Mosaic {
         self.data[ind] = tile;
     }
     fn right_tile(&self, mut x: usize, y: usize) -> u8 {
+        if MosaicVariant::Flat == self.variant {
+            todo!("Not implemented for flat")
+        }
         x = (x + 1) % self.size;
         self.get(x, y)
     }
     fn left_tile(&self, mut x: usize, y: usize) -> u8 {
+        if MosaicVariant::Flat == self.variant {
+            todo!("Not implemented for flat")
+        }
         x = (x + self.size - 1) % self.size;
         self.get(x, y)
     }
     fn up_tile(&self, x: usize, y: usize) -> u8 {
-        match y {
-            0 => 0,
-            y => self.get(x, y - 1),
+        if y == 0 {
+            use MosaicVariant as V;
+            match self.variant {
+                V::Toric => self.get(x, self.size - 1),
+                V::Cylindrical | V::Flat => 0,
+            }
+        } else {
+            self.get(x, y - 1)
         }
     }
     fn down_tile(&self, x: usize, y: usize) -> u8 {
-        match y + 1 {
-            new_y if new_y == self.size => 0,
-            new_y => self.get(x, new_y),
-        }
-    }
-    fn up_tile_toric(&self, x: usize, y: usize) -> u8 {
-        match y {
-            0 => self.get(x, self.size - 1),
-            y => self.get(x, y - 1),
-        }
-    }
-    fn down_tile_toric(&self, x: usize, y: usize) -> u8 {
-        match y + 1 {
-            new_y if new_y == self.size => self.get(x, 0),
-            new_y => self.get(x, new_y),
+        let new_y = y + 1;
+        if new_y == self.size {
+            use MosaicVariant as V;
+            match self.variant {
+                V::Toric => self.get(x, 0),
+                V::Cylindrical | V::Flat => 0,
+            }
+        } else {
+            self.get(x, new_y)
         }
     }
 }
 
 fn main() -> Result<()> {
-    
     // mosaics with <= this number of crossings will not be saved
     // for 5 crossings, we don't need anything <= 5
     // for 4 crossings, anything <=2
