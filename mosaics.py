@@ -3,24 +3,7 @@ from math import sqrt
 from operator import xor
 from typing import ClassVar, Callable
 from sage.all import Link  # type:ignore
-
-
-def string2matrix(string: str) -> list[int]:
-    """convert each char in the string to an int, 
-    using hex conversion to properly convert 'a' to 11 """
-    return [int(elem, base=16) for elem in string]
-
-
-def count_crossings(mosaic: str | list[int]) -> int:
-    if type(mosaic) is str:
-        return len([t for t in mosaic if t in ['9', 'a']])
-    return len([t for t in mosaic if t in [9, 10]])
-
-
-def count_tiles(mosaic: str | list[int]) -> int:
-    if type(mosaic) is str:
-        return len([t for t in mosaic if t != '0'])
-    return len([t for t in mosaic if t != 0])
+from mosaic_util import *
 
 
 @dataclass
@@ -97,7 +80,7 @@ class NormMosaic:
         return mosaic
 
 
-def traverse_mosaic(mosaic: NormMosaic):
+def traverse_mosaic(mosaic: NormMosaic, prune_links=True, prune_unknots=True) -> Link | str | None:
     pos = MosaicConn(0, 0, 0)
     # getting the first non-zero tile
     while (tile := mosaic.get_tile(pos)) == 0:
@@ -109,10 +92,12 @@ def traverse_mosaic(mosaic: NormMosaic):
 
     under_crosses: list[tuple[MosaicConn, int]] = []
     over_crosses: dict[tuple[int, int], tuple[MosaicConn, int]] = {}
+
     # this should equal # of moves through the mosaic,
     # if it's a knot (meaning traversing will visit all tiles)
     exp_moves = count_tiles(mosaic.tiles) + \
         len([t for t in mosaic.tiles if t >= 7])
+    
     # getting first side as a starting point
     pos.side = list(connections_dict[tile])[0]
     start_pos = pos.as_tup
@@ -126,7 +111,6 @@ def traverse_mosaic(mosaic: NormMosaic):
         tile = mosaic.get_tile(pos)
         assert tile is not None  # Tile should be valid...
 
-        out_side = connections_dict[tile][pos.side]
         if tile in (9, 10):  # if it's a crossing
             edge_ct += 1
             # check if under or over
@@ -134,11 +118,18 @@ def traverse_mosaic(mosaic: NormMosaic):
                 under_crosses.append((pos, edge_ct))
             else:
                 over_crosses[pos.as_pos_tup] = (pos, edge_ct)
+        out_side = connections_dict[tile].get(pos.side)
+        if out_side is None:
+            return matrix2string(mosaic.tiles)
         pos.side = out_side
         pos = mosaic.get_connecting_pos(pos)
         if pos.as_tup == start_pos:
             break
-    if exp_moves != move_ct:
+    # if we get less moves than expected, must be a link
+    if exp_moves != move_ct and prune_links:
+        return None
+    # if there are < 3 crossings, must be an unknot
+    if len(under_crosses) < 3 and prune_unknots:
         return None
     # calculating the PD codes from the crossing data
     max_edge = 2*len(under_crosses)
@@ -155,6 +146,7 @@ def traverse_mosaic(mosaic: NormMosaic):
         pd_code = [(1 if i > max_edge else i) for i in pd_code]
         pd_codes.append(pd_code)
     return Link(pd_codes)
+
 
 connections_dict: list[dict[int, int]] = [
     {},

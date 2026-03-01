@@ -4,7 +4,6 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
 from multiprocessing import current_process
 from pathlib import Path
-import textwrap
 import threading
 from time import sleep, time
 import mosaics as m
@@ -68,7 +67,7 @@ def main():
 
 def handle_dirs(args):
     id = args.id
-    run_catalog(mosaic_dir(id), results_dir(id),redo=True)
+    run_catalog(mosaic_dir(id), results_dir(id), redo=True)
     if args.merge_also:
         print("Merging...", flush=True)
         handle_merge(args)
@@ -84,24 +83,24 @@ def handle_file(args):
 
 def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
     """Uses multiple processes to parse through a directory of mosaic files"""
-
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Thread to wait for user input without blocking main tasks
+    stop_event = threading.Event()  # will be set by keypress thread
+
+    def wait_for_key():
+        input()
+        print("stopping...", flush=True)
+        stop_event.set()
+    print("Press Enter to stop submitting new tasks...\n")
+    key_thread = threading.Thread(target=wait_for_key, daemon=True)
+    key_thread.start()
+
+    i = 0
+    max_queue = 8
+    futures: dict[Future, int] = {}
+    # spawning workers to parse files
     with ProcessPoolExecutor(max_workers=6) as executor:
-        i = 0
-
-        # Thread to wait for user input without blocking main tasks
-        stop_event = threading.Event()  # will be set by keypress thread
-
-        def wait_for_key():
-            input()
-            print("stopping...", flush=True)
-            stop_event.set()
-        print("Press Enter to stop submitting new tasks...\n")
-        key_thread = threading.Thread(target=wait_for_key, daemon=True)
-        key_thread.start()
-
-        max_queue = 8
-        futures: dict[Future, int] = {}
         while not stop_event.is_set():
             # Printing status, consuming old results
             min_ind = min(futures.values() or (0,))
@@ -121,9 +120,10 @@ def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
                 in_path = inp_dir / f"pt{i}.txt"
                 out_path = out_dir / f"pt{i}.txt"
                 i += 1
-
+                # if output is already generated:
                 if out_path.is_file() and not redo:
                     continue
+                # if we're done all the files in the folder, exit
                 if not in_path.is_file():
                     break
                 print(f"Queued {in_path}", flush=True)
@@ -138,8 +138,6 @@ def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
          for fut, i in futures.items()]
         executor.shutdown(wait=True, cancel_futures=True)
         print("fully shutdown now")
-        # [print("res:", r.result()) for r in futures if not r.cancelled()]
-    return
 
 
 def combine_results(path_id: str):
@@ -168,21 +166,27 @@ def combine_results(path_id: str):
     for polynomial, res in all_results.items():
         # yes, I'm re-running the ID/simplify steps.
         # But the alternative is to run knotID on all the result files...
-        knot = m.parse_mosaic(res.mosaic_str)
+        mosaic = m.NormMosaic.build_cylindrical(res.mosaic_str)
+        knot = m.traverse_mosaic(mosaic)
         if knot is None or type(knot) is str:
-            print("ERR: should not be null knots in final results")
+            print(
+                f"ERR: should not be null or broken knots in final results: {res.mosaic_str}")
             break
+
         new_knot = knot.simplify()  # type: ignore
         if new_knot is not None:
             knot = new_knot
-
+        # this can be quite slow for some knots
         knotid = str(knot.get_knotinfo(unique=False))  # type: ignore
+        # cleaning up the KnotInfo output
         for s in ["KnotInfo", '[', ']', "'"]:
             knotid = knotid.replace(s, "")
-        knot_ids.append((knotid, polynomial))
         img_path = imgs / (f"{knotid}__{res.mosaic_str}.png")
         mvis.gen_png(res.mosaic_str, knotid, img_path)
         print(f"saved {img_path}")
+
+        knot_ids.append((knotid, polynomial))
+
     # generate output file
     knot_ids.sort(key=lambda k: k[0])
     out_file = output_dir / f"{path_id}_results.txt"
@@ -221,36 +225,30 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
         for mosaic_str in f:
             mosaic_str = mosaic_str.strip()
             line_ct += 1
-            
+
             mosaic = m.NormMosaic.build_cylindrical(mosaic_str)
             knot = m.traverse_mosaic(mosaic)
-            # print(f"ID'd {line_ct}")
-
-            if (type(knot) is str):  # rules out like 40k
+            if (type(knot) is str):
                 bad_mosaics.append(f"{mosaic_str}\n")
                 continue
-            if (knot is None):  # rules out like 40k
+            if (knot is None):
                 links.append(f"{mosaic_str}\n")
                 continue
-
             new_knot = knot.simplify()  # type: ignore # probably expensive?
             if new_knot:
                 knot = new_knot
-            # print(f"Simp {line_ct}")
 
             polynomial = str(knot.homfly_polynomial())  # type: ignore
             tile_ct = m.count_tiles(mosaic_str)
 
-            prev_best = knot_bank.get(polynomial)  # rules out  40k
+            prev_best = knot_bank.get(polynomial)
             # this is safe because of short-circuit 'or' eval
             if prev_best is None or tile_ct < prev_best.tile_ct:
                 result: Knot_Result = Knot_Result(
                     mosaic_str, tile_ct, polynomial)
                 knot_bank[polynomial] = result
-
     d_time = time()-start_t
-    # with (win_proj / "bad_mosaics.txt").open('a') as file:
-    #     file.writelines(bad_mosaics)
+
     if len(bad_mosaics):
         print(f"Bad Mosaics in {in_file}", flush=True)
     with out_file.open("w") as out:

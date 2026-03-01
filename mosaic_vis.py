@@ -1,13 +1,11 @@
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
-from tkinter import font
-from typing import Callable
 from PIL import Image, ImageTk
 from tkinter.filedialog import askopenfilename
 from matplotlib import pyplot as plt
 
-from mosaics import *
+from mosaic_util import *
 
 
 def gen_png(mosaic_str: str, id: str, img_path: Path):
@@ -38,7 +36,7 @@ def gen_png(mosaic_str: str, id: str, img_path: Path):
 def build_img(mosaic_tiles: list[int]) -> Image.Image:
     """Builds a PIL image from a set of mosaic tiles"""
     if not hasattr(build_img, "tiles"):
-        build_img.tiles = load_tile_imgs()
+        build_img.tiles = load_tile_imgs(True)
 
     tiles = build_img.tiles
     tile_size = tiles[0].width
@@ -173,9 +171,16 @@ class ImageBrowser(tk.Tk):
             return build_img(string2matrix(mosaic))
         return ImageBrowser(mosaics, getter)
 
+    @classmethod
+    def from_strings(cls, strs: list[str]):
+        def getter(mosaic: str):
+            return build_img(string2matrix(mosaic))
+        return ImageBrowser(strs, getter)
+
 
 if __name__ == "__main__":
     file = Path(askopenfilename(initialdir="."))
     if not file:
         exit()
     ImageBrowser.from_mosaic_file(file).mainloop()
+    # ImageBrowser.from_strings(["0021127a98883434"]).mainloop()
