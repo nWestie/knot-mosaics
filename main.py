@@ -221,8 +221,9 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
         for mosaic_str in f:
             mosaic_str = mosaic_str.strip()
             line_ct += 1
-
-            knot = m.parse_mosaic(mosaic_str)
+            
+            mosaic = m.NormMosaic.build_cylindrical(mosaic_str)
+            knot = m.traverse_mosaic(mosaic)
             # print(f"ID'd {line_ct}")
 
             if (type(knot) is str):  # rules out like 40k
