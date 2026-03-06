@@ -22,11 +22,11 @@ struct Mosaic {
     variant: MosaicVariant,
 }
 impl Mosaic {
-    fn new(size: usize) -> Mosaic {
+    fn new(size: usize, variant: MosaicVariant) -> Mosaic {
         Mosaic {
             data: vec![11; size * size],
             size,
-            variant: MosaicVariant::Cylindrical,
+            variant,
         }
     }
     fn crossing_ct(&self) -> usize {
@@ -103,7 +103,7 @@ fn main() -> Result<()> {
     let now = Instant::now(); //Timing 
 
     println!("generating ...");
-    mosaic_gen(&mut outbuf, size, discard_crossings)?;
+    mosaic_gen_v2(&mut outbuf, size, MosaicVariant::Cylindrical)?;
     print!(
         "Generation complete! ({:.6} s)",
         now.elapsed().as_secs_f64()
@@ -112,10 +112,67 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, trim_crossings: usize) -> Result<()> {
+fn mosaic_gen_v2(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) -> Result<()> {
+    let mut mosaic_ct = 0;
+    let mut mosaic = Mosaic::new(size,var);
+    let len = mosaic.data.iter().len();
+    let mut branches: Vec<Vec<u8>> = vec![vec![]; len];
+    let mut depth = 0;
+    branches[0] = Vec::from(calc_valid_tiles(&mosaic, depth));
+    branches[0].reverse();
+    'outer: loop {
+        // indexing down into a branch
+        if let Some(first) = branches[depth].pop() {
+            mosaic.set_linear(depth, first);
+        } else {
+            // if there are no more options for level zero
+            if depth == 0 {
+                break;
+            }
+            mosaic.set_linear(depth, 11);
+            depth -= 1;
+            continue;
+        }
+        depth += 1;
+        for i in depth..len {
+            branches[i] = Vec::from(calc_valid_tiles(&mosaic, i));
+            branches[i].reverse();
+            if let Some(item) = branches[i].pop() {
+                mosaic.set_linear(i, item);
+            } else {
+                mosaic.set_linear(i, 11);
+                depth = i - 1;
+                continue 'outer;
+            }
+        }
+        depth = len - 1;
+
+        loop {
+            let res = write_mosaic(out_buff, &mosaic)?;
+            mosaic_ct += 1;
+            if let RollOver::Rolled(index) = res {
+                println!(
+                    "on pt{index} - {} generated, {} saved",
+                    format_num!(",.3s", mosaic_ct as f64),
+                    format_num!(",.3s", (out_buff.max_lines * index) as f64)
+                );
+            }
+            if let Some(item) = branches[depth].pop() {
+                mosaic.set_linear(depth, item);
+            } else {
+                break;
+            }
+        }
+        mosaic.set_linear(depth, 11);
+        depth -= 1;
+    }
+    Ok(())
+}
+
+fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) -> Result<()> {
     let vector_length = size * size - 1;
     // let mut mosaic: Vec<u8> = vec![11; vector_length + 1]; // 11 is not a valid tile
-    let mut mosaic: Mosaic = Mosaic::new(size);
+    let mut mosaic: Mosaic = Mosaic::new(size, var);
     let mut curr_tile: usize = 0;
     let mut rightward = true;
     let mut digit_index: Vec<usize> = vec![0; vector_length + 1]; // I think this is the index into valid_tiles for each tile
@@ -124,7 +181,7 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, trim_crossings: usiz
     loop {
         if rightward {
             // calculate the base3 number for
-            valid_tiles_for[curr_tile] = calc_valid_tiles(&mosaic, curr_tile, size);
+            valid_tiles_for[curr_tile] = calc_valid_tiles(&mosaic, curr_tile);
             // this is where we back our way up the tree
             if valid_tiles_for[curr_tile].is_empty() {
                 rightward = false;
@@ -144,22 +201,18 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, trim_crossings: usiz
         // if not rightward
         if (curr_tile == vector_length) {
             mosaic_ct += 1;
-            if mosaic.crossing_ct() <= trim_crossings || has_loop(&mosaic) {
-                // if mosaic.crossing_ct() <= trim_crossings {
+            // if mosaic.crossing_ct() <= trim_crossings || has_loop(&mosaic) {
                 // don't bother recording any with low crossings,
                 // we know these have a mosaic number under what we're working on
-            } else if let RollOver::Rolled(index) = write_mosaic(out_buff, &mosaic)? {
+            // } else 
+            if let RollOver::Rolled(index) = write_mosaic(out_buff, &mosaic)? {
                 println!(
                     "on pt{index} - {} generated, {} saved",
                     format_num!(",.3s", mosaic_ct as f64),
                     format_num!(",.3s", (out_buff.max_lines * index) as f64)
                 );
             }
-            // if mosaic_ct > 50_000_000{
-            //     break; // stop here for testing, after 50 million are generated
-            // }
         }
-
         // if we already wrote a matrix with the last valid tile in this
         if digit_index[curr_tile] == valid_tiles_for[curr_tile].len() {
             if curr_tile == 0 {
@@ -169,7 +222,6 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, trim_crossings: usiz
             curr_tile -= 1;
             continue;
         }
-
         //Move to next tile in list for current tile, then continue rightward to fill the rest of the matrix
         mosaic.set_linear(
             curr_tile,
@@ -185,10 +237,10 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, trim_crossings: usiz
     Ok(())
 }
 
-fn calc_valid_tiles(mosaic: &Mosaic, curr_tile: usize, size: usize) -> &'static [u8] {
+fn calc_valid_tiles(mosaic: &Mosaic, curr_tile: usize) -> &'static [u8] {
     //Find valid tiles for current tile based on surroundings
-    let curr_x = curr_tile % size;
-    let curr_y = curr_tile / size;
+    let curr_x = curr_tile % mosaic.size;
+    let curr_y = curr_tile / mosaic.size;
 
     let right_tile = mosaic.right_tile(curr_x, curr_y);
     let left_tile = mosaic.left_tile(curr_x, curr_y);
