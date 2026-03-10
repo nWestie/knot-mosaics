@@ -15,8 +15,9 @@ def gen_png(mosaic_str: str, id: str, img_path: Path):
 
     dpi: int = 300
 
-    fig, ax = plt.subplots(nrows=2, figsize=(6, 7), gridspec_kw={
-                           "height_ratios": [6, 1]}, dpi=dpi)
+    fig, ax = plt.subplots(
+        nrows=2, figsize=(6, 7), gridspec_kw={"height_ratios": [6, 1]}, dpi=dpi
+    )
 
     # ---- Image ----
     ax[0].imshow(img)
@@ -25,8 +26,15 @@ def gen_png(mosaic_str: str, id: str, img_path: Path):
 
     # ---- Function text ----
     ax[1].axis("off")
-    ax[1].text(0.5, 0.5, f"ID: {id} Tile #: {count_tiles(mosaic_str)}", ha="center", va="center",
-               fontsize=16, wrap=True,)
+    ax[1].text(
+        0.5,
+        0.5,
+        f"ID: {id} Tile #: {count_tiles(mosaic_str)}",
+        ha="center",
+        va="center",
+        fontsize=16,
+        wrap=True,
+    )
 
     plt.tight_layout()
     plt.savefig(img_path, bbox_inches="tight")
@@ -42,16 +50,16 @@ def build_img(mosaic_tiles: list[int]) -> Image.Image:
     tile_size = tiles[0].width
     # border_size = 4
     # border_color = (196, 196, 196, 255)
-    grid_size = int(len(mosaic_tiles)**0.5)
-    assert grid_size**2 == len(mosaic_tiles),  "Mosaic must be square"
+    grid_size = int(len(mosaic_tiles) ** 0.5)
+    assert grid_size**2 == len(mosaic_tiles), "Mosaic must be square"
 
-    pixel_size = (tile_size)*grid_size  # size of the finished img in pixels
+    pixel_size = (tile_size) * grid_size  # size of the finished img in pixels
     out_img = Image.new("RGB", (pixel_size, pixel_size), "white")
 
     xind = 0
     yind = 0
     for tile in mosaic_tiles:
-        out_img.paste(tiles[tile], (xind*tile_size, yind*tile_size))
+        out_img.paste(tiles[tile], (xind * tile_size, yind * tile_size))
         # increment indexes to iterate over matrix
         xind = xind + 1
         if xind == grid_size:
@@ -80,7 +88,7 @@ class ImageBrowser(tk.Tk):
 
         self.title("Image Browser")
         # self.geometry("900x600")
-        self.state('zoomed')
+        self.state("zoomed")
 
         self.get_img = getter
         self.image_names: list[str] = image_names
@@ -106,7 +114,7 @@ class ImageBrowser(tk.Tk):
             left_frame,
             yscrollcommand=scrollbar.set,
             activestyle="dotbox",
-            font=("TKDefaultFont", 16)
+            font=("TKDefaultFont", 16),
         )
         self.listbox.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.listbox.yview)
@@ -159,6 +167,7 @@ class ImageBrowser(tk.Tk):
     def from_img_folder(cls, dir: Path):
         def getter(mosaic):
             return Image.open(dir / f"{mosaic}.png")
+
         mosaics = [p.stem for p in dir.iterdir()]
         return ImageBrowser(mosaics, getter)
 
@@ -169,12 +178,14 @@ class ImageBrowser(tk.Tk):
 
         def getter(mosaic: str):
             return build_img(string2matrix(mosaic))
+
         return ImageBrowser(mosaics, getter)
 
     @classmethod
     def from_strings(cls, strs: list[str]):
         def getter(mosaic: str):
             return build_img(string2matrix(mosaic))
+
         return ImageBrowser(strs, getter)
 
 
