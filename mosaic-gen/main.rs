@@ -1,8 +1,8 @@
 #![allow(unused)]
 
-use std::fs::create_dir_all;
 use std::io::Result;
 use std::time::Instant;
+use std::{default, fs::create_dir_all};
 mod conn_table;
 mod rolling_buff;
 use format_num::format_num;
@@ -13,8 +13,8 @@ enum MosaicVariant {
     Flat,
     Cylindrical,
     Toric,
-    // Cubic,
-    // Mobius,
+    Cubic,
+    Mobius,
 }
 struct Mosaic {
     data: Vec<u8>,
@@ -70,6 +70,7 @@ impl Mosaic {
             match self.variant {
                 V::Toric => self.get(x, self.size - 1),
                 V::Cylindrical | V::Flat => 0,
+                _ => todo!("Other Variants not implemented"),
             }
         } else {
             self.get(x, y - 1)
@@ -82,6 +83,7 @@ impl Mosaic {
             match self.variant {
                 V::Toric => self.get(x, 0),
                 V::Cylindrical | V::Flat => 0,
+                _ => todo!("Other Variants not implemented"),
             }
         } else {
             self.get(x, new_y)
@@ -103,7 +105,7 @@ fn main() -> Result<()> {
     let now = Instant::now(); //Timing 
 
     println!("generating ...");
-    mosaic_gen_v2(&mut outbuf, size, MosaicVariant::Cylindrical)?;
+    mosaic_gen(&mut outbuf, size, MosaicVariant::Cylindrical)?;
     print!(
         "Generation complete! ({:.6} s)",
         now.elapsed().as_secs_f64()
@@ -112,23 +114,23 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn mosaic_gen_v2(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) -> Result<()> {
+fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) -> Result<()> {
     let mut mosaic_ct = 0;
     let mut mosaic = Mosaic::new(size, var);
     let len = mosaic.data.iter().len();
     let mut branches: Vec<Vec<u8>> = vec![vec![]; len];
     let mut depth = 0;
     branches[0] = Vec::from(calc_valid_tiles(&mosaic, depth));
-    branches[0].reverse();
+    branches[0].reverse(); // this just preserves numeric order of the output
     'outer: loop {
-        // indexing down into a branch
+        // moving to the next branch at <depth>
         if let Some(first) = branches[depth].pop() {
             mosaic.set_linear(depth, first);
             depth += 1;
         } else {
-            // if all options used, back out a level
+            // if all branches explored, back out a level
             if depth == 0 {
-                break;
+                break; // exit if we explore all top-level branches
             }
             mosaic.set_linear(depth, 11);
             depth -= 1;
@@ -171,74 +173,6 @@ fn mosaic_gen_v2(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVarian
     Ok(())
 }
 
-fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) -> Result<()> {
-    let vector_length = size * size - 1;
-    // let mut mosaic: Vec<u8> = vec![11; vector_length + 1]; // 11 is not a valid tile
-    let mut mosaic: Mosaic = Mosaic::new(size, var);
-    let mut curr_tile: usize = 0;
-    let mut rightward = true;
-    let mut digit_index: Vec<usize> = vec![0; vector_length + 1]; // I think this is the index into valid_tiles for each tile
-    let mut valid_tiles_for: Vec<&[u8]> = vec![&[]; vector_length + 1];
-    let mut mosaic_ct: u64 = 0;
-    loop {
-        if rightward {
-            // calculate the base3 number for
-            valid_tiles_for[curr_tile] = calc_valid_tiles(&mosaic, curr_tile);
-            // this is where we back our way up the tree
-            if valid_tiles_for[curr_tile].is_empty() {
-                rightward = false;
-                curr_tile -= 1;
-                continue;
-            }
-            digit_index[curr_tile] = 1;
-            mosaic.set_linear(curr_tile, valid_tiles_for[curr_tile][0]);
-            if curr_tile == vector_length {
-                // if we're done the first pass of filling the matrix
-                rightward = false;
-                continue;
-            }
-            curr_tile += 1;
-            continue;
-        }
-        // if not rightward
-        if (curr_tile == vector_length) {
-            mosaic_ct += 1;
-            // if mosaic.crossing_ct() <= trim_crossings || has_loop(&mosaic) {
-            // don't bother recording any with low crossings,
-            // we know these have a mosaic number under what we're working on
-            // } else
-            if let RollOver::Rolled(index) = write_mosaic(out_buff, &mosaic)? {
-                println!(
-                    "on pt{index} - {} generated, {} saved",
-                    format_num!(",.3s", mosaic_ct as f64),
-                    format_num!(",.3s", (out_buff.max_lines * index) as f64)
-                );
-            }
-        }
-        // if we already wrote a matrix with the last valid tile in this
-        if digit_index[curr_tile] == valid_tiles_for[curr_tile].len() {
-            if curr_tile == 0 {
-                break; // this is the exit condition for the program: we've exhausted our way back to the 0th tile
-            }
-            mosaic.set_linear(curr_tile, 11);
-            curr_tile -= 1;
-            continue;
-        }
-        //Move to next tile in list for current tile, then continue rightward to fill the rest of the matrix
-        mosaic.set_linear(
-            curr_tile,
-            valid_tiles_for[curr_tile][digit_index[curr_tile]],
-        );
-        digit_index[curr_tile] += 1;
-        if curr_tile < vector_length {
-            curr_tile += 1;
-            rightward = true;
-        }
-    }
-
-    Ok(())
-}
-
 fn calc_valid_tiles(mosaic: &Mosaic, curr_tile: usize) -> &'static [u8] {
     //Find valid tiles for current tile based on surroundings
     let curr_x = curr_tile % mosaic.size;
@@ -266,12 +200,11 @@ fn calc_valid_tiles(mosaic: &Mosaic, curr_tile: usize) -> &'static [u8] {
         _ => 1,
     } + 27
         * match down_tile {
-            //down
             11 => 2,
             0 | 1 | 2 | 5 => 0,
             _ => 1,
         };
-    conn_table::CONNECTION_TABLE[hash]
+    conn_table::CONNS_TO_VALID_TILES[hash]
 }
 
 fn write_mosaic(output_writer: &mut RollingBufWriter, mosaic: &Mosaic) -> Result<RollOver> {

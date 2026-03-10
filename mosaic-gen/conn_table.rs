@@ -1,4 +1,3 @@
-
 //Connection table for mosaic generation
 //Essentially a lazy hash map, states of surrounding tiles are converted to a base-3 number:
 // 0: no connection to current tile
@@ -12,8 +11,25 @@
 
 // Ex - if the tile has a connection to the top, and is undecided on the bottom,
 // with no left/right conneciton, it would have a hash of 2010(base3) = 2*3^3 + 1*3 = 21
+use crate::{Conn, Conn::*};
 
-pub const CONNECTION_TABLE: &[&[u8]] = &[
+// Lookup Table: given the tile, whether each side is connected or not.
+pub const TILE_CONNECTION_SIDES: &[&[Conn]] = &[
+    &[No, No, No, No],     // 0
+    &[No, No, Yes, Yes],   // 1
+    &[Yes, No, No, Yes],   // 2
+    &[Yes, Yes, No, No],   // 3
+    &[No, Yes, Yes, No],   // 4
+    &[Yes, No, Yes, No],   // 5
+    &[No, Yes, No, Yes],   // 6
+    &[Yes, Yes, Yes, Yes], // 7
+    &[Yes, Yes, Yes, Yes], // 8
+    &[Yes, Yes, Yes, Yes], // 9
+    &[Yes, Yes, Yes, Yes], // 10
+];
+
+// Lookup table: Given the sides that are connected, which tiles are valid.
+pub const CONNS_TO_VALID_TILES: &[&[u8]] = &[
     //000x (base3)
     &[0],
     &[],
