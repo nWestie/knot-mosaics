@@ -29,7 +29,7 @@ impl RollingBufWriter {
     }
 
     fn open_file(base_path: &Path, index: usize) -> io::Result<BufWriter<File>> {
-        let path = base_path.join(format!("pt{index}.txt"));
+        let path = base_path.join(format!("pt{index:04}.txt"));
         let file = File::create(path)?;
         Ok(BufWriter::new(file))
     }

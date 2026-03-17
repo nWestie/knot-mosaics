@@ -224,12 +224,14 @@ impl Mosaic {
 }
 
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
     // mosaics with <= this number of crossings will not be saved
     // for 5 crossings, we don't need anything <= 5
     // for 4 crossings, anything <=2
+    // set to zero to include all mosaics
     let discard_crossings: usize = 0;
-    let size: usize = 4;
-    let output_folder = "../data/4_cyl_testV3";
+    let size: usize = 5;
+    let output_folder = "../data/5_flat";
     let max_lines = 50_000;
     create_dir_all(output_folder)?;
     let mut outbuf = RollingBufWriter::new(output_folder, max_lines)?;
@@ -237,7 +239,7 @@ fn main() -> Result<()> {
     let now = Instant::now(); //Timing 
 
     println!("generating ...");
-    mosaic_gen(&mut outbuf, size, MosaicVariant::Cylindrical)?;
+    mosaic_gen(&mut outbuf, size, MosaicVariant::Flat)?;
     print!(
         "Generation complete! ({:.6} s)",
         now.elapsed().as_secs_f64()
@@ -300,7 +302,8 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) 
             }
         }
         mosaic.set_tile(depth, 11);
-        depth -= 1;
+        // the weird max here is to handle the case of a 1x1 mosaic
+        depth = std::cmp::max(1, depth) - 1;
     }
     Ok(())
 }
