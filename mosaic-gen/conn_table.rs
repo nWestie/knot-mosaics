@@ -15,17 +15,18 @@ use crate::{Conn, Conn::*};
 
 // Lookup Table: given the tile, whether each side is connected or not.
 pub const TILE_CONNECTION_SIDES: &[&[Conn]] = &[
-    &[No, No, No, No],     // 0
-    &[No, No, Yes, Yes],   // 1
-    &[Yes, No, No, Yes],   // 2
-    &[Yes, Yes, No, No],   // 3
-    &[No, Yes, Yes, No],   // 4
-    &[Yes, No, Yes, No],   // 5
-    &[No, Yes, No, Yes],   // 6
-    &[Yes, Yes, Yes, Yes], // 7
-    &[Yes, Yes, Yes, Yes], // 8
-    &[Yes, Yes, Yes, Yes], // 9
-    &[Yes, Yes, Yes, Yes], // 10
+    &[No, No, No, No],             // 0
+    &[No, No, Yes, Yes],           // 1
+    &[Yes, No, No, Yes],           // 2
+    &[Yes, Yes, No, No],           // 3
+    &[No, Yes, Yes, No],           // 4
+    &[Yes, No, Yes, No],           // 5
+    &[No, Yes, No, Yes],           // 6
+    &[Yes, Yes, Yes, Yes],         // 7
+    &[Yes, Yes, Yes, Yes],         // 8
+    &[Yes, Yes, Yes, Yes],         // 9
+    &[Yes, Yes, Yes, Yes],         // 10
+    &[Maybe, Maybe, Maybe, Maybe], // 11 (the 'unknown' tile)
 ];
 
 // Lookup table: Given the sides that are connected, which tiles are valid.
