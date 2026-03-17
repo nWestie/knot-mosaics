@@ -6,7 +6,8 @@ from multiprocessing import current_process
 from pathlib import Path
 import threading
 from time import sleep, time
-import mosaics as m
+from typing import Callable
+import mosaics as M
 import mosaic_vis as mvis
 
 # sage doesn't have type support ¯\_(ツ)_/¯
@@ -14,77 +15,119 @@ from sage.all import Link, SR  # type:ignore
 
 
 output_dir = Path(f"output/")
-def mosaic_dir(id): return Path(f"data/{id}")
-def results_dir(id): return Path(f"data/{id}_res")
-def img_dir(id): return output_dir / f"{id}_imgs"
+
+
+def mosaic_dir(type: str, size: int):
+    # get the input folder of mosaics
+    return Path(f"data/{size}_{type}")
+
+
+def results_dir(type: str):
+    # get the output folder of intermediate results
+    return Path(f"data/{type}_res")
+
+
+def img_dir(type: str):
+    # get the output folder for images
+    return output_dir / f"{type}_imgs"
 
 
 @dataclass
-class Knot_Result:
+class KnotResult:
+    """Intermediate format for knot results"""
+
+    size: int
     mosaic_str: str
     tile_ct: int
     polynomial: str
 
     def to_str(self) -> str:
-        return f"{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
+        return f"{self.size}|{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
 
     @classmethod
     def from_str(cls, str: str):
         parts = str.strip().split("|")
-        return Knot_Result(parts[0], int(parts[1]), parts[2])
+        return KnotResult(
+            int(parts[0]), parts[1].strip(), int(parts[2]), parts[3].strip()
+        )
+
+    def better_than(self, other: "KnotResult|None") -> bool:
+        """Returns True if self is the preferred result over other"""
+        # Some result preferred to none
+        if other is None:
+            return True
+        # Smaller mosaic is preferred
+        if self.size != other.size:
+            return self.size < other.size
+        # lower tile number is preferred
+        if self.tile_ct != other.tile_ct:
+            return self.tile_ct < other.tile_ct
+        # lower indexes preffered
+        return int(self.mosaic_str, 11) < int(other.mosaic_str, 11)
+        # TODO: Implement edge connections metric?
+        # fewer edge connections preferred. Would be super annoying with only results
+
+
+parser_types = {
+    "flat": M.NormMosaic.build_flat,
+    "cyl": M.NormMosaic.build_cylindrical,
+    "toric": M.NormMosaic.build_toric,
+    "mobius": lambda _: print("NOT IMPLEMENTED"),
+    "cubic": lambda _: print("NOT IMPLEMENTED"),
+}
 
 
 def main():
     parser = argparse.ArgumentParser()
     subs = parser.add_subparsers(help="mode to run in", required=True)
-    parser.add_argument(
-        '-i', '--images', help='Generate images', action='store_true')
+    parser.add_argument("-i", "--images", help="Generate images", action="store_true")
 
     string = subs.add_parser("string", help="Parse a single string")
-    string.add_argument('string', help='Determine knot type from string')
+    string.add_argument("string", help="Determine knot type from string")
     string.set_defaults(func=handle_str)
 
-    dir = subs.add_parser("dir",
-                          help='parse mosiacs in dir corresponding to this ID')
-    dir.add_argument('id', help='parse folder of mosaic lists')
-    dir.add_argument('-m', '--merge-also', action='store_true',
-                     help='also run merge after parsing')
-    dir.set_defaults(func=handle_dirs)
+    parse = subs.add_parser(
+        "parse", help="parse mosiacs in dir corresponding to this ID"
+    )
+    parse.add_argument("size", type=int, help="mosaic size")
+    parse.add_argument("type", choices=parser_types.keys(), help="type of mosaic")
+    parse.add_argument(
+        "--keep-existing",
+        action="store_true",
+        help="skip inputs that have existing results",
+    )
+    parse.set_defaults(func=run_catalog)
 
-    merge = subs.add_parser(
-        'merge', help='merge result files with this ID string')
-    merge.add_argument('id', help='folder name in output & data')
+    merge = subs.add_parser("merge", help="merge result files with this ID string")
+    merge.add_argument(
+        "type", choices=parser_types.keys(), help="folder name in output & data"
+    )
     merge.set_defaults(func=handle_merge)
 
-    file = subs.add_parser('file', help="parse single file")
-    file.add_argument('input_file', help="path of file to parse", type=Path)
-    file.add_argument(
-        'output_file', help="path to ouput results to", type=Path)
+    file = subs.add_parser("file", help="parse single file")
+    file.add_argument("input_file", help="path of file to parse", type=Path)
+    file.add_argument("output_file", help="path to ouput results to", type=Path)
     file.set_defaults(func=handle_file)
     args = parser.parse_args()
     args.func(args)
 
 
-def handle_dirs(args):
-    id = args.id
-    run_catalog(mosaic_dir(id), results_dir(id), redo=True)
-    if args.merge_also:
-        print("Merging...", flush=True)
-        handle_merge(args)
-
-
 def handle_merge(args):
-    combine_results(args.id)
+    combine_results(args.type)
 
 
 def handle_file(args):
-    catalog_file(args.input_file, args.output_file)
+    # raise NotImplementedError("Implement for multi-type input")
+    catalog_file(args.input_file, args.output_file, M.NormMosaic.build_cylindrical)
 
 
-def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
+def run_catalog(args):
     """Uses multiple processes to parse through a directory of mosaic files"""
+    [type, size, redo] = [args.type, args.size, not args.keep_existing]
+    builder: Callable[[str], M.NormMosaic] = parser_types[type]
+    inp_dir = mosaic_dir(type, size)
+    out_dir = results_dir(type)
     out_dir.mkdir(parents=True, exist_ok=True)
-
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
 
@@ -92,6 +135,7 @@ def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
         input()
         print("stopping...", flush=True)
         stop_event.set()
+
     print("Press Enter to stop submitting new tasks...\n")
     key_thread = threading.Thread(target=wait_for_key, daemon=True)
     key_thread.start()
@@ -117,8 +161,8 @@ def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
 
             # Queueing new files
             if len(futures) < max_queue:
-                in_path = inp_dir / f"pt{i}.txt"
-                out_path = out_dir / f"pt{i}.txt"
+                in_path = inp_dir / f"pt{i:04}.txt"
+                out_path = out_dir / f"{size}_pt{i:04}.txt"
                 i += 1
                 # if output is already generated:
                 if out_path.is_file() and not redo:
@@ -127,50 +171,53 @@ def run_catalog(inp_dir: Path, out_dir: Path, redo: bool = False):
                 if not in_path.is_file():
                     break
                 print(f"Queued {in_path}", flush=True)
-                fut = executor.submit(
-                    catalog_file, in_path, out_path)
-                futures[fut] = i-1
+                fut = executor.submit(catalog_file, in_path, out_path, builder)
+                futures[fut] = i - 1
             else:
                 sleep(1)
 
         print("waiting for current workers to finish...", flush=True)
-        [print(f"Working on: {i}, running={fut.running()}")
-         for fut, i in futures.items()]
+        [
+            print(f"Working on: {i}, running={fut.running()}")
+            for fut, i in futures.items()
+        ]
         executor.shutdown(wait=True, cancel_futures=True)
         print("fully shutdown now")
 
 
-def combine_results(path_id: str):
-    """ Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
+def combine_results(mosaic_type: str):
+    """Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
     # maps polynomial to knot result
-    all_results: dict[str, Knot_Result] = {}
+    all_results: dict[str, KnotResult] = {}
 
     # merge results, keeping lowest tile number
-    results_folder = results_dir(path_id)
+    results_folder = results_dir(mosaic_type)
     for file in results_folder.iterdir():
         results, complete = load_result_file(file)
         if not complete:
             print(f"{file} is incomplete")
-        for r in results:
-            prev_best = all_results.get(r.polynomial)
+        for res in results:
+            prev_best = all_results.get(res.polynomial)
             # this is safe because of short-circuit 'or' eval
-            if prev_best is None or r.tile_ct < prev_best.tile_ct:
-                all_results[r.polynomial] = r
+            if res.better_than(prev_best):
+                all_results[res.polynomial] = res
 
     # generate images
     print("writing file and images...")
-    imgs = img_dir(path_id)
-    imgs.mkdir(parents=True, exist_ok=True)
+    imgs = img_dir(mosaic_type)
+    if imgs.exists():
+        [f.unlink() for f in imgs.iterdir()]
+    else:
+        imgs.mkdir(parents=True)
     # tuples of (knotID, polynomial)
-    knot_ids: list[tuple[str, str]] = []
+    knot_ids: list[tuple[str, KnotResult]] = []
     for polynomial, res in all_results.items():
         # yes, I'm re-running the ID/simplify steps.
         # But the alternative is to run knotID on all the result files...
-        mosaic = m.NormMosaic.build_cylindrical(res.mosaic_str)
-        knot = m.traverse_mosaic(mosaic)
-        if knot is None or type(knot) is str:
-            print(
-                f"ERR: should not be null or broken knots in final results: {res.mosaic_str}")
+        mosaic = M.NormMosaic.build_cylindrical(res.mosaic_str)
+        knot = M.traverse_mosaic(mosaic, prune_unknots=False)
+        if type(knot) is M.NotAKnot:
+            print(f"ERR: Not a Knot({type(knot)}): {res.mosaic_str}")
             break
 
         new_knot = knot.simplify()  # type: ignore
@@ -179,40 +226,43 @@ def combine_results(path_id: str):
         # this can be quite slow for some knots
         knotid = str(knot.get_knotinfo(unique=False))  # type: ignore
         # cleaning up the KnotInfo output
-        for s in ["KnotInfo", '[', ']', "'"]:
+        for s in ["KnotInfo", "[", "]", "'"]:
             knotid = knotid.replace(s, "")
-        img_path = imgs / (f"{knotid}__{res.mosaic_str}.png")
+        img_path = imgs / (f"{res.size}-{knotid}-{res.mosaic_str}.png")
         mvis.gen_png(res.mosaic_str, knotid, img_path)
-        print(f"saved {img_path}")
+        print(f"saved: {img_path}")
 
-        knot_ids.append((knotid, polynomial))
+        knot_ids.append((knotid, res))
 
     # generate output file
     knot_ids.sort(key=lambda k: k[0])
-    out_file = output_dir / f"{path_id}_results.txt"
+    padding = max(len(k) for k, _ in knot_ids) + 1
+    out_file = output_dir / f"{mosaic_type}_results.txt"
     with out_file.open("w") as out:
-        for id, poly in knot_ids:
-            res = all_results[poly]
-            out.write(f"{id} : {res.mosaic_str} : {str(SR(poly))}\n")
+        for id, res in knot_ids:
+            out.write(f"{id.ljust(padding)}|{res.to_str()}\n")
 
 
-def load_result_file(file: Path) -> tuple[list[Knot_Result], bool]:
+def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
     """Extracts knot results from file. Returns true if file contains the correct end-indicator"""
-    results: list[Knot_Result] = []
+    results: list[KnotResult] = []
     with file.open("r") as inp:
         for line in inp:
             # If this line is not present, indicates an interruption during writing.
             line = line.strip()
             if line == "END_RESULT":
                 return results, True
-            results.append(Knot_Result.from_str(line))
+            if line:
+                results.append(KnotResult.from_str(line))
     return results, False
 
 
-def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]:
-    """Finds all unique knots """
+def catalog_file(
+    in_file: Path, out_file: Path, builder: Callable
+) -> tuple[list[KnotResult], int]:
+    """Finds all unique knots"""
     # maps polynomial to tile number/mosaic
-    knot_bank: dict[str, Knot_Result] = {}
+    knot_bank: dict[str, KnotResult] = {}
 
     # keep track of how many we've parsed
     line_ct = 0
@@ -226,45 +276,49 @@ def catalog_file(in_file: Path, out_file: Path) -> tuple[list[Knot_Result], int]
             mosaic_str = mosaic_str.strip()
             line_ct += 1
 
-            mosaic = m.NormMosaic.build_cylindrical(mosaic_str)
-            knot = m.traverse_mosaic(mosaic)
-            if (type(knot) is str):
-                bad_mosaics.append(f"{mosaic_str}\n")
+            mosaic: M.NormMosaic = builder(mosaic_str)
+            knot = M.traverse_mosaic(mosaic, prune_unknots=False)
+            if type(knot) is M.NotAKnot:
+                match knot:
+                    case M.NotAKnot.BAD_CONNECTIONS:
+                        bad_mosaics.append(f"{str(knot)}, {mosaic_str}\n")
                 continue
-            if (knot is None):
-                links.append(f"{mosaic_str}\n")
-                continue
+
             new_knot = knot.simplify()  # type: ignore # probably expensive?
             if new_knot:
                 knot = new_knot
 
             polynomial = str(knot.homfly_polynomial())  # type: ignore
-            tile_ct = m.count_tiles(mosaic_str)
+            tile_ct = M.count_tiles(mosaic_str)
 
             prev_best = knot_bank.get(polynomial)
             # this is safe because of short-circuit 'or' eval
-            if prev_best is None or tile_ct < prev_best.tile_ct:
-                result: Knot_Result = Knot_Result(
-                    mosaic_str, tile_ct, polynomial)
+            result: KnotResult = KnotResult(
+                mosaic.nominal_size, mosaic_str, tile_ct, polynomial
+            )
+            if result.better_than(prev_best):
                 knot_bank[polynomial] = result
-    d_time = time()-start_t
+    d_time = time() - start_t
 
     if len(bad_mosaics):
         print(f"Bad Mosaics in {in_file}", flush=True)
     with out_file.open("w") as out:
-        lines = [r.to_str() for r in knot_bank.values()]
-        out.write("\n".join(lines))
-        out.write("\nEND_RESULT")
+        lines = [(r.to_str()+"\n") for r in knot_bank.values()]
+        out.writelines(lines)
+        out.write("END_RESULT")
 
-    print(f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s" +
-          f" ({line_ct/d_time:.0f} lines/s)", flush=True)
+    print(
+        f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s"
+        + f" ({line_ct/d_time:.0f} lines/s)",
+        flush=True,
+    )
     return list(knot_bank.values()), line_ct
 
 
 def handle_str(args):
     mosaic_str: str = args.string
-    mosaic = m.NormMosaic.build_cylindrical(mosaic_str)
-    knot = m.traverse_mosaic(mosaic)
+    mosaic = M.NormMosaic.build_cylindrical(mosaic_str)
+    knot = M.traverse_mosaic(mosaic)
     if type(knot) is str:
         print(f"Bad Mosaic: {mosaic_str}")
         return

@@ -25,8 +25,7 @@
             "request": "launch",
             "program": "./main.py",
             "console": "integratedTerminal",
-            // "args": "file data/4_cyl/pt1.txt tmpOut.txt", 
-            "args": "dir 4_cyl_all", 
+            "args": "merge cyl", 
         },
     ]
 }

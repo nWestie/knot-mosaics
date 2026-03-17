@@ -39,6 +39,7 @@ class NormMosaic:
     tiles: list[int]
     width: int
     height: int
+    nominal_size: int
     # mapping of connections at the edges
     boundlinks: dict[tuple[int, int, int], MosaicConn]
 
@@ -73,7 +74,7 @@ class NormMosaic:
     def build_flat(cls, string: str) -> "NormMosaic":
         tiles = string2matrix(string)
         size = int(sqrt(len(tiles)))
-        return NormMosaic(tiles, size, size, {})
+        return NormMosaic(tiles, size, size, size, {})
 
     @classmethod
     def build_cylindrical(cls, string: str) -> "NormMosaic":
@@ -81,16 +82,32 @@ class NormMosaic:
         # adding the left <-> right links
         for i in range(mosaic.height):
             if mosaic.get_tile(Pos(0, i)) in (0, 2, 3, 6):
-                continue
-            b1 = MosaicConn(0, i, 2)
-            b2 = MosaicConn(mosaic.width - 1, i, 0)
+                continue  # no connections out the sides
+            edge1 = MosaicConn(0, i, 2)
+            edge2 = MosaicConn(mosaic.width - 1, i, 0)
+            mosaic.boundlinks[edge1.as_tup] = edge2
+            mosaic.boundlinks[edge2.as_tup] = edge1
+        return mosaic
+
+    @classmethod
+    def build_toric(cls, string: str) -> "NormMosaic":
+        mosaic = cls.build_cylindrical(string)
+        # adding the top <-> bottom links
+        for i in range(mosaic.width):
+            if mosaic.get_tile(Pos(i, 0)) in (0, 1, 2, 5):
+                continue  # no connections out the top
+            b1 = MosaicConn(i, 0, 1)
+            b2 = MosaicConn(i, mosaic.height - 1, 3)
             mosaic.boundlinks[b1.as_tup] = b2
             mosaic.boundlinks[b2.as_tup] = b1
         return mosaic
 
 
 def traverse_mosaic(  # type: ignore
-    mosaic: NormMosaic, prune_links: bool = True, prune_unknots: bool = True, classify_only: bool = False
+    mosaic: NormMosaic,
+    prune_links: bool = True,
+    prune_unknots: bool = True,
+    classify_only: bool = False,
 ) -> Link | NotAKnot:
     pos: MosaicConn = MosaicConn(0, 0, 0)
     # getting the first non-zero tile
@@ -130,7 +147,7 @@ def traverse_mosaic(  # type: ignore
             else:
                 over_crosses[pos.as_pos_tup] = (pos, edge_ct)
         out_side = connections_dict[tile].get(pos.side)
-        if out_side is None:   
+        if out_side is None:
             return NotAKnot.BAD_CONNECTIONS
         pos.side = out_side
         res = mosaic.get_connecting_pos(pos)
@@ -160,7 +177,7 @@ def traverse_mosaic(  # type: ignore
         # wrap edges back to zero
         pd_code = [(1 if i > max_edge else i) for i in pd_code]
         pd_codes.append(pd_code)
-    
+
     return NotAKnot.GOODKNOT if classify_only else Link(pd_codes)
 
 
