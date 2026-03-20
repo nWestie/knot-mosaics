@@ -1,18 +1,46 @@
 use crate::conn_table::*;
 use crate::*;
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Conn {
+    No = 0,
+    Yes = 1,
+    Maybe = 2,
+}
+#[derive(Clone, Copy)]
+enum Side {
+    Right = 0,
+    Up = 1,
+    Left = 2,
+    Down = 3,
+}
+#[derive(Clone, Copy, PartialEq)]
+struct ConnEntry {
+    conn: Conn,
+    connected_index: u16,
+}
+impl ConnEntry {
+    const NON_EDGE: ConnEntry = ConnEntry {
+        conn: Conn::No,
+        connected_index: u16::MAX,
+    };
+    const NO_CONNECT: ConnEntry = ConnEntry {
+        conn: Conn::No,
+        connected_index: u16::MAX - 1,
+    };
+}
 pub struct Mosaic {
-    pub data: Vec<u8>,
-    pub edges: Vec<ConnEntry>,
-    pub variant: MosaicVariant,
-    pub size: usize, // grid square size
-    pub len: usize,  // number of tiles
+    data: Vec<u8>,
+    edges: Vec<ConnEntry>,
+    variant: MosaicVariant,
+    size: usize, // grid square size
+    len: usize,  // number of tiles
 }
 impl Mosaic {
     pub fn new(size: usize, variant: MosaicVariant) -> Mosaic {
         use MosaicVariant as M;
         let len = match &variant {
-            M::Cubic => size * size * 6,
+            M::Cubic { .. } => size * size * 6,
             _ => size * size,
         };
         assert!(len < (u16::MAX - 1) as usize, "Mosaic size is too big");
@@ -43,12 +71,6 @@ impl Mosaic {
         }
     }
 
-    pub fn get_tile(&self, index: usize) -> u8 {
-        self.data[index]
-    }
-    pub fn get_tile_xy(&self, x: usize, y: usize) -> u8 {
-        self.data[self.index_from_xy(x, y)]
-    }
     pub fn set_tile(&mut self, index: usize, tile: u8) {
         self.data[index] = tile;
         for (i, conn) in TILE_CONNECTION_SIDES[tile as usize].iter().enumerate() {
@@ -64,8 +86,38 @@ impl Mosaic {
             }
         }
     }
+    pub fn get_valid_tiles(&self, index: usize) -> &'static [u8] {
+        let right = self.get_neighbor_conn(index, Side::Right) as usize;
+        let up = self.get_neighbor_conn(index, Side::Up) as usize;
+        let left = self.get_neighbor_conn(index, Side::Left) as usize;
+        let down = self.get_neighbor_conn(index, Side::Down) as usize;
+        let hash = down * 27 + left * 9 + up * 3 + right;
+        CONNS_TO_VALID_TILES[hash]
+    }
+    /// returns true for any mosaics with a row that is a simple loop.
+    #[allow(unused)]
+    pub fn has_loop(&self) -> bool {
+        if matches!(self.variant, MosaicVariant::Cubic { .. }) {
+            todo!("Not Implemented for  cubic");
+        }
+        let sz = self.size;
+        'row_loop: for row in 0..sz {
+            for col in 0..sz {
+                let item = self.get_tile_xy(col, row);
+                if !matches!(item, 5 | 9 | 10) {
+                    // contine to next row if any item doesn't have a horizontal connection
+                    continue 'row_loop;
+                }
+            }
+            return true;
+        }
+        false
+    }
+    pub fn get_len(&self) -> usize {
+        self.len
+    }
     fn index_to_xy(&self, index: usize) -> (usize, usize) {
-        if self.variant != MosaicVariant::Cubic {
+        if !matches!(self.variant, MosaicVariant::Cubic { .. }) {
             let col = index % self.size;
             let row = index / self.size;
             return (col, row);
@@ -74,11 +126,14 @@ impl Mosaic {
         todo!("Handle Cubic")
     }
     fn index_from_xy(&self, x: usize, y: usize) -> usize {
-        if self.variant != MosaicVariant::Cubic {
+        if !matches!(self.variant, MosaicVariant::Cubic { .. }) {
             return y * self.size + x;
         }
         // handle cubic
         todo!("Handle Cubic")
+    }
+    fn get_tile_xy(&self, x: usize, y: usize) -> u8 {
+        self.data[self.index_from_xy(x, y)]
     }
     fn get_neighbor_conn(&self, index: usize, side: Side) -> Conn {
         // Check if this edge is on the border
@@ -122,13 +177,17 @@ impl Mosaic {
             }
         }
     }
-    pub fn get_valid_tiles(&self, index: usize) -> &'static [u8] {
-        let right = self.get_neighbor_conn(index, Side::Right) as usize;
-        let up = self.get_neighbor_conn(index, Side::Up) as usize;
-        let left = self.get_neighbor_conn(index, Side::Left) as usize;
-        let down = self.get_neighbor_conn(index, Side::Down) as usize;
-        let hash = down * 27 + left * 9 + up * 3 + right;
-        CONNS_TO_VALID_TILES[hash]
+}
+impl std::fmt::Display for Mosaic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.data
+                .iter()
+                .map(|val| format!("{:x}", val))
+                .collect::<String>()
+        )
     }
 }
 

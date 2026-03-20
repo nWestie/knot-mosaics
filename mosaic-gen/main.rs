@@ -1,66 +1,66 @@
-#![allow(unused)]
 mod conn_table;
 mod mosaics;
 mod rolling_buff;
 
+use clap::Parser;
 use format_num::format_num;
 use std::io::Result;
+use std::path::PathBuf;
 use std::time::Instant;
-use std::{default, fs::create_dir_all};
+use std::fs::create_dir_all;
 
 use crate::mosaics::Mosaic;
 use rolling_buff::{RollOver, RollingBufWriter};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, clap::Subcommand, Debug)]
 enum MosaicVariant {
+    /// Mosaic with no edge connections
     Flat,
+    /// Mosaic with Left and Right edges stiched
     Cylindrical,
+    /// Mosaic with Left and Right edges stiched
     Toric,
-    Cubic,
+    /// Mosaic with L/R edges stiched, but twisted (top-left -> bottom right)
     Mobius,
+    Cubic {
+        cubic_type: u8,
+    },
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Conn {
-    No = 0,
-    Yes = 1,
-    Maybe = 2,
-}
-#[derive(Clone, Copy)]
-enum Side {
-    Right = 0,
-    Up = 1,
-    Left = 2,
-    Down = 3,
-}
-#[derive(Clone, Copy, PartialEq)]
-struct ConnEntry {
-    conn: Conn,
-    connected_index: u16,
-}
-impl ConnEntry {
-    const NON_EDGE: ConnEntry = ConnEntry {
-        conn: Conn::No,
-        connected_index: u16::MAX,
-    };
-    const NO_CONNECT: ConnEntry = ConnEntry {
-        conn: Conn::No,
-        connected_index: u16::MAX - 1,
-    };
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct CliArgs {
+    /// Number of times to greet
+    mosaic_size: usize,
+    /// Name of the person to greet
+    #[command(subcommand)]
+    mosaic_type: MosaicVariant,
+    /// Max lines in each output file
+    #[arg(short, long, default_value_t = 50_000)]
+    max_lines: usize,
+    /// Folder to put output
+    #[arg(short, long, default_value_os_t =PathBuf::from("../data/"))]
+    base_dir: PathBuf,
+    /// discard knots with less than N crossings
+    #[arg(short, long, default_value_t = 0)]
+    discard_crossings_below: usize,
+    /// discard knots with less than N crossings
+    #[arg(short, long)]
+    remove_loops: bool,
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let args = CliArgs::parse();
     // mosaics with <= this number of crossings will not be saved
     // for 5 crossings, we don't need anything <= 5
     // for 4 crossings, anything <=2
     // set to zero to include all mosaics
-    let discard_crossings: usize = 0;
-    let size: usize = 1;
+    let size: usize = args.mosaic_size;
     let output_folder = "../data/1_toric";
-    let max_lines = 50_000;
+
+    // let max_lines = 50_000;
     create_dir_all(output_folder)?;
-    let mut outbuf = RollingBufWriter::new(output_folder, max_lines)?;
+    let mut outbuf = RollingBufWriter::new(output_folder, args.max_lines)?;
 
     let now = Instant::now(); //Timing 
 
@@ -75,13 +75,12 @@ fn main() -> Result<()> {
 }
 
 fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) -> Result<()> {
-    let mut mosaic_ct = 0;
     let mut mosaic = Mosaic::new(size, var);
-    let len = mosaic.len;
-    let mut branches: Vec<Vec<u8>> = vec![vec![]; len];
+    let mut branches: Vec<Vec<u8>> = vec![vec![]; mosaic.get_len()];
+    let mut mosaic_ct = 0;
     let mut depth = 0;
     branches[0] = Vec::from(mosaic.get_valid_tiles(0));
-    branches[0].reverse(); // this just preserves numeric order of the output
+    branches[0].reverse(); // this preserves increasing numeric order of the output
     'outer: loop {
         // moving to the next branch at <depth>
         if let Some(first) = branches[depth].pop() {
@@ -97,7 +96,7 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) 
             continue;
         }
         // descend down into the tree, finding branches (left side)
-        while depth < len {
+        while depth < mosaic.get_len() {
             branches[depth] = Vec::from(mosaic.get_valid_tiles(depth));
             branches[depth].reverse();
             if let Some(item) = branches[depth].pop() {
@@ -112,7 +111,7 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) 
 
         depth -= 1;
         loop {
-            let res = write_mosaic(out_buff, &mosaic)?;
+            let res = out_buff.write_line(&mosaic.to_string())?;
             mosaic_ct += 1;
             if let RollOver::Rolled(index) = res {
                 println!(
@@ -134,31 +133,3 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) 
     Ok(())
 }
 
-fn write_mosaic(output_writer: &mut RollingBufWriter, mosaic: &Mosaic) -> Result<RollOver> {
-    output_writer.write_line(
-        &mosaic
-            .data // get raw values
-            .iter() // for each item in the mosaic
-            .map(|val| format!("{:x}", val)) // format it as hex
-            .collect::<Vec<String>>() // re-collect into a vector of strings?
-            .join(""), // join into contiguous string
-    )
-}
-
-// removing any mosaics with a row loop.
-// with: get through first 50 million in 54.3 seconds. storing ~175k
-// without: get through first 50 million in 45 seconds, but store ~322k
-fn has_loop(mosaic: &Mosaic) -> bool {
-    let sz = mosaic.size;
-    'row_loop: for row in 0..sz {
-        for col in 0..sz {
-            let item = mosaic.get_tile_xy(col, row);
-            if !matches!(item, 5 | 9 | 10) {
-                // contine to next row if any item doesn't have a horizontal connection
-                continue 'row_loop;
-            }
-        }
-        return true;
-    }
-    false
-}
