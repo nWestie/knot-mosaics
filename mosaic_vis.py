@@ -1,11 +1,20 @@
+import math
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 from tkinter.filedialog import askopenfilename
 from matplotlib import pyplot as plt
-
 from mosaic_util import *
+
+
+def main():
+    file = Path(askopenfilename(initialdir="."))
+    if not file:
+        exit()
+
+    ImageBrowser.from_mosaic_file(file).mainloop()
+    # ImageBrowser.from_strings(["000000212121989766663400","0021127a98883434"]).mainloop()
 
 
 def gen_png(mosaic_str: str, id: str, img_path: Path):
@@ -40,33 +49,52 @@ def gen_png(mosaic_str: str, id: str, img_path: Path):
     plt.savefig(img_path, bbox_inches="tight")
     plt.close(fig)
 
-
 def build_img(mosaic_tiles: list[int]) -> Image.Image:
     """Builds a PIL image from a set of mosaic tiles"""
     if not hasattr(build_img, "tiles"):
         build_img.tiles = load_tile_imgs(True)
 
     tiles = build_img.tiles
-    tile_size = tiles[0].width
     # border_size = 4
     # border_color = (196, 196, 196, 255)
-    grid_size = int(len(mosaic_tiles) ** 0.5)
-    assert grid_size**2 == len(mosaic_tiles), "Mosaic must be square"
+    grid_size = len(mosaic_tiles) ** 0.5
+    is_cubic = False
+    if grid_size == int(grid_size):
+        grid_size = int(grid_size)
+        width = height = grid_size
+    else:
+        grid_size = (len(mosaic_tiles) / 6) ** 0.5
+        grid_size = int(grid_size)
+        width = grid_size * 3
+        height = grid_size * 4
+        is_cubic = True
+    tile_size = tiles[0].width
 
-    pixel_size = (tile_size) * grid_size  # size of the finished img in pixels
-    out_img = Image.new("RGB", (pixel_size, pixel_size), "white")
+    out_img = Image.new("RGB", (tile_size * width, tile_size * height), "white")
 
-    xind = 0
-    yind = 0
-    for tile in mosaic_tiles:
-        out_img.paste(tiles[tile], (xind * tile_size, yind * tile_size))
-        # increment indexes to iterate over matrix
-        xind = xind + 1
-        if xind == grid_size:
-            yind = yind + 1
-            xind = 0
+    for i, tile in enumerate(mosaic_tiles):
+        x, y = index_to_xy(i, grid_size, is_cubic)
+        out_img.paste(tiles[tile], (x * tile_size, y * tile_size))
 
     return out_img
+
+
+def index_to_xy(index: int, size: int, is_cubic: bool) -> tuple[int, int]:
+    if not is_cubic:
+        col = index % size
+        row = math.floor(index / size)
+        return (col, row)
+    cubic_len = size * size * 6
+    # handle cubic
+    if index < (cubic_len / 2):
+        col = index % (size * 3)
+        row = math.floor(index / (size * 3))
+        return (col, row)
+
+    index -= int(cubic_len / 2)
+    col = index % size + size
+    row = math.floor((index / size) + size)
+    return (col, row)
 
 
 def load_tile_imgs(hi_res=False) -> dict[int, Image.Image]:
@@ -190,8 +218,4 @@ class ImageBrowser(tk.Tk):
 
 
 if __name__ == "__main__":
-    file = Path(askopenfilename(initialdir="."))
-    if not file:
-        exit()
-    ImageBrowser.from_mosaic_file(file).mainloop()
-    # ImageBrowser.from_strings(["0021127a98883434"]).mainloop()
+    exit(main())

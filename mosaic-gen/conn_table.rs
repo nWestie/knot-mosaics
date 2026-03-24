@@ -1,19 +1,11 @@
-//Connection table for mosaic generation
-//Essentially a lazy hash map, states of surrounding tiles are converted to a base-3 number:
-// 0: no connection to current tile
-// 1: must connect to current tile
-// 2: undecided, may or may not connect
-//
-// Digits in the number are assigned as below:
+use crate::mosaics::{Conn, Conn::*};
+
+// Sides are indexed as follows:
 //    1
 // 2 ▇▇ 0
 //    3
 
-// Ex - if the tile has a connection to the top, and is undecided on the bottom,
-// with no left/right conneciton, it would have a hash of 2010(base3) = 2*3^3 + 1*3 = 21
-use crate::{Conn, Conn::*};
-
-// Lookup Table: given the tile, whether each side is connected or not.
+/// Lookup Table: given the tile, whether each side is connected or not.
 pub const TILE_CONNECTION_SIDES: &[&[Conn]] = &[
     &[No, No, No, No],             // 0
     &[No, No, Yes, Yes],           // 1
@@ -29,7 +21,44 @@ pub const TILE_CONNECTION_SIDES: &[&[Conn]] = &[
     &[Maybe, Maybe, Maybe, Maybe], // 11 (the 'unknown' tile)
 ];
 
-// Lookup table: Given the sides that are connected, which tiles are valid.
+// For Cubic mosaics, it can be useful to generate mosaics only using a specific set
+// of sides. The sides are numbered as follows, for a 2D unrolling of a cube:
+//   ┌───┬───┬───┐
+//   │ 0 │ 1 │ 2 │
+//   └───┼───┼───┘
+//       │ 3 │
+//       ├───┤
+//       │ 4 │
+//       ├───┤
+//       │ 5 │
+//       └───┘
+//
+/// All unique combinations of cube sides (tivial single-side not included)
+pub const CUBIC_TYPES: &[&[usize]] = &[
+    &[0, 1],             // 0
+    &[0, 1, 2],          // 1
+    &[0, 1, 3],          // 2
+    &[1, 3, 4, 5],       // 3
+    &[0, 1, 2, 3],       // 4
+    &[0, 1, 2, 3, 4],    // 5
+    &[0, 1, 2, 3, 4, 5], // 6
+];
+
+// Connection table for mosaic generation
+
+// Essentially a lazy hash map, states of surrounding tiles are converted to a base-3 number:
+// 0: no connection to current tile
+// 1: must connect to current tile
+// 2: undecided, may or may not connect
+//
+// Tiles are ordered as above, counter clockwise from the right
+// The index is calculated as follows based on the connection status of each side:
+// index = <down>*3^3 + <left>*3^2 + <up>*3 + <right>
+//
+// Ex - if the tile has a connection to the top, and is undecided on the bottom,
+// with no left/right conneciton, it would have a hash of 2010(base3) = 2*3^3 + 1*3 = 21
+
+/// Lookup table: Given the sides that are connected, which tiles are valid.
 pub const CONNS_TO_VALID_TILES: &[&[u8]] = &[
     //000x (base3)
     &[0],

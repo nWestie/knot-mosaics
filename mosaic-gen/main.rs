@@ -4,10 +4,10 @@ mod rolling_buff;
 
 use clap::Parser;
 use format_num::format_num;
+use std::fs::create_dir_all;
 use std::io::Result;
 use std::path::PathBuf;
 use std::time::Instant;
-use std::fs::create_dir_all;
 
 use crate::mosaics::Mosaic;
 use rolling_buff::{RollOver, RollingBufWriter};
@@ -23,8 +23,20 @@ enum MosaicVariant {
     /// Mosaic with L/R edges stiched, but twisted (top-left -> bottom right)
     Mobius,
     Cubic {
-        cubic_type: u8,
+        #[arg(default_value_t = 6)]
+        cubic_type: usize,
     },
+}
+impl MosaicVariant {
+    fn dir_code(&self) -> String {
+        match self {
+            MosaicVariant::Flat => String::from("flat"),
+            MosaicVariant::Cylindrical => String::from("cyl"),
+            MosaicVariant::Toric => String::from("toric"),
+            MosaicVariant::Mobius => String::from("mobius"),
+            MosaicVariant::Cubic { cubic_type } => format!("cubic/var{cubic_type}"),
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -41,41 +53,49 @@ struct CliArgs {
     /// Folder to put output
     #[arg(short, long, default_value_os_t =PathBuf::from("../data/"))]
     base_dir: PathBuf,
+    // mosaics with <= this number of crossings will not be saved
+    // for 5 crossings, we don't need anything <= 5
+    // for 4 crossings, anything <=2
+    // set to zero to include all mosaics
     /// discard knots with less than N crossings
     #[arg(short, long, default_value_t = 0)]
     discard_crossings_below: usize,
-    /// discard knots with less than N crossings
+    /// discard mosaics that contain trivial loops
     #[arg(short, long)]
     remove_loops: bool,
 }
 
 fn main() -> Result<()> {
-    let args = CliArgs::parse();
-    // mosaics with <= this number of crossings will not be saved
-    // for 5 crossings, we don't need anything <= 5
-    // for 4 crossings, anything <=2
-    // set to zero to include all mosaics
+    // let args = CliArgs::parse();
+    let args = CliArgs {
+        mosaic_size: 2,
+        mosaic_type: MosaicVariant::Cubic { cubic_type: 6 },
+        max_lines: 50_000,
+        base_dir: PathBuf::from("../data"),
+        discard_crossings_below: 0,
+        remove_loops: false,
+    };
     let size: usize = args.mosaic_size;
-    let output_folder = "../data/1_toric";
-
-    // let max_lines = 50_000;
-    create_dir_all(output_folder)?;
-    let mut outbuf = RollingBufWriter::new(output_folder, args.max_lines)?;
+    let folder_name = format!("{size}_{}", args.mosaic_type.dir_code());
+    let output_folder = args.base_dir.join(folder_name);
 
     let now = Instant::now(); //Timing 
-
     println!("generating ...");
-    mosaic_gen(&mut outbuf, size, MosaicVariant::Toric)?;
+
+    create_dir_all(&output_folder)?;
+    let mut outbuf = RollingBufWriter::new(output_folder, args.max_lines)?;
+    let mosaic = Mosaic::new(size, args.mosaic_type);
+    mosaic_gen(&mut outbuf, mosaic)?;
+    outbuf.flush()?;
+
     print!(
         "Generation complete! ({:.6} s)",
         now.elapsed().as_secs_f64()
     );
-    outbuf.flush()?;
     Ok(())
 }
 
-fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) -> Result<()> {
-    let mut mosaic = Mosaic::new(size, var);
+fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()> {
     let mut branches: Vec<Vec<u8>> = vec![vec![]; mosaic.get_len()];
     let mut mosaic_ct = 0;
     let mut depth = 0;
@@ -132,4 +152,3 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, size: usize, var: MosaicVariant) 
     }
     Ok(())
 }
-

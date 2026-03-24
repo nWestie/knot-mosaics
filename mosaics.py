@@ -91,6 +91,7 @@ class NormMosaic:
 
     @classmethod
     def build_toric(cls, string: str) -> "NormMosaic":
+        raise NotImplementedError("Need added matrix")
         mosaic = cls.build_cylindrical(string)
         # adding the top <-> bottom links
         for i in range(mosaic.width):

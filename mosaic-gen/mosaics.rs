@@ -17,20 +17,25 @@ enum Side {
 #[derive(Clone, Copy, PartialEq)]
 struct ConnEntry {
     conn: Conn,
-    connected_index: u16,
+    connected_to: u16,
 }
 impl ConnEntry {
     const NON_EDGE: ConnEntry = ConnEntry {
         conn: Conn::No,
-        connected_index: u16::MAX,
+        connected_to: u16::MAX,
     };
     const NO_CONNECT: ConnEntry = ConnEntry {
         conn: Conn::No,
-        connected_index: u16::MAX - 1,
+        connected_to: u16::MAX - 1,
     };
 }
+struct XYSide {
+    x: usize,
+    y: usize,
+    side: Side,
+}
 pub struct Mosaic {
-    data: Vec<u8>,
+    tiles: Vec<u8>,
     edges: Vec<ConnEntry>,
     variant: MosaicVariant,
     size: usize, // grid square size
@@ -45,42 +50,55 @@ impl Mosaic {
         };
         assert!(len < (u16::MAX - 1) as usize, "Mosaic size is too big");
 
-        let mut edges = vec![ConnEntry::NON_EDGE; len * 4];
-        use MosaicVariant as MV;
-        edges = match variant {
-            MV::Flat => {
-                edges = close_top_bottom(edges, size);
-                close_sides(edges, size, size)
-            }
-            MV::Cylindrical => {
-                edges = close_top_bottom(edges, size);
-                link_sides(edges, size, size)
-            }
-            MV::Toric => {
-                edges = link_top_bottom(edges, size);
-                link_sides(edges, size, size)
-            }
-            _ => todo!("Other types not implemented"),
-        };
-        Mosaic {
-            data: vec![11; len],
-            edges,
+        let mut mos = Mosaic {
+            tiles: vec![11; len],
+            edges: vec![ConnEntry::NON_EDGE; len * 4],
             variant,
             size,
             len,
+        };
+        use MosaicVariant as MV;
+        match mos.variant {
+            MV::Flat => {
+                mos.link_top_bottom(true);
+                mos.link_left_right(true);
+            }
+            MV::Cylindrical => {
+                mos.link_top_bottom(true);
+                mos.link_left_right(false);
+            }
+            MV::Toric => {
+                mos.link_top_bottom(false);
+                mos.link_left_right(false);
+            }
+            MV::Cubic { .. } => {
+                link_cubic_sides(&mut mos);
+            }
+            _ => todo!("Other types not implemented"),
+        };
+        if let MosaicVariant::Cubic { cubic_type } = mos.variant {
+            let non_zero_sides = CUBIC_TYPES[cubic_type];
+            for i in 0..mos.tiles.len() {
+                let side_num = mos.cubic_get_side_num(i);
+                // for each tile not on the face for this cubic type
+                if !non_zero_sides.contains(&side_num) {
+                    mos.set_tile(i, 0);
+                }
+            }
         }
+        mos
     }
 
     pub fn set_tile(&mut self, index: usize, tile: u8) {
-        self.data[index] = tile;
+        self.tiles[index] = tile;
         for (i, conn) in TILE_CONNECTION_SIDES[tile as usize].iter().enumerate() {
             let edge_ind = index * 4 + i;
-            let conn_ind = self.edges[edge_ind].connected_index as usize;
+            let conn_ind = self.edges[edge_ind].connected_to as usize;
             // if it's an edge connection, and
             // only clear the connection when the current tile is < the tile it's connected to,
             // because tiles > than current are gaurunteed to be unset(=11)
             // connections are only set
-            if (conn_ind < self.len * 4) && (edge_ind < conn_ind) {
+            if (conn_ind < self.edges.len()) && (edge_ind < conn_ind) {
                 self.edges[edge_ind].conn = *conn;
                 self.edges[conn_ind].conn = *conn;
             }
@@ -116,24 +134,39 @@ impl Mosaic {
     pub fn get_len(&self) -> usize {
         self.len
     }
-    fn index_to_xy(&self, index: usize) -> (usize, usize) {
+    fn index_to_xy(&self, mut index: usize) -> (usize, usize) {
         if !matches!(self.variant, MosaicVariant::Cubic { .. }) {
             let col = index % self.size;
             let row = index / self.size;
             return (col, row);
         }
         // handle cubic
-        todo!("Handle Cubic")
+        if index < (self.len / 2) {
+            let col = index % (self.size * 3);
+            let row = index / (self.size * 3);
+            return (col, row);
+        }
+        index -= self.len / 2;
+        let col = index % self.size + self.size;
+        let row = (index / self.size) + self.size;
+        (col, row)
     }
-    fn index_from_xy(&self, x: usize, y: usize) -> usize {
+    fn index_from_xy(&self, mut x: usize, mut y: usize) -> usize {
         if !matches!(self.variant, MosaicVariant::Cubic { .. }) {
             return y * self.size + x;
         }
         // handle cubic
-        todo!("Handle Cubic")
+        if y < self.size {
+            return y * (self.size * 3) + x;
+        }
+        // for lower half of cubic, convert coords
+        // to put 0,0 in top left of side 3
+        x -= self.size;
+        y -= self.size;
+        self.size.pow(2) * 3 + y * self.size + x
     }
     fn get_tile_xy(&self, x: usize, y: usize) -> u8 {
-        self.data[self.index_from_xy(x, y)]
+        self.tiles[self.index_from_xy(x, y)]
     }
     fn get_neighbor_conn(&self, index: usize, side: Side) -> Conn {
         // Check if this edge is on the border
@@ -141,11 +174,12 @@ impl Mosaic {
         if edge_conn != ConnEntry::NON_EDGE {
             return edge_conn.conn;
         }
+        // do calculation for interior edges
         let (x, y) = self.index_to_xy(index);
         match side {
             Side::Right => {
                 let tile_ind = self.index_from_xy(x + 1, y);
-                match self.data[tile_ind] {
+                match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
                     0 | 2 | 3 | 6 => Conn::No,
                     _ => Conn::Yes,
@@ -153,7 +187,7 @@ impl Mosaic {
             }
             Side::Up => {
                 let tile_ind = self.index_from_xy(x, y - 1);
-                match self.data[tile_ind] {
+                match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
                     0 | 3 | 4 | 5 => Conn::No,
                     _ => Conn::Yes,
@@ -161,7 +195,7 @@ impl Mosaic {
             }
             Side::Left => {
                 let tile_ind = self.index_from_xy(x - 1, y);
-                match self.data[tile_ind] {
+                match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
                     0 | 1 | 4 | 6 => Conn::No,
                     _ => Conn::Yes,
@@ -169,7 +203,7 @@ impl Mosaic {
             }
             Side::Down => {
                 let tile_ind = self.index_from_xy(x, y + 1);
-                match self.data[tile_ind] {
+                match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
                     0 | 1 | 2 | 5 => Conn::No,
                     _ => Conn::Yes,
@@ -177,66 +211,211 @@ impl Mosaic {
             }
         }
     }
+    fn cubic_get_side_num(&self, index: usize) -> usize {
+        let (x, y) = self.index_to_xy(index);
+        let (x, y) = (x / self.size, y / self.size);
+        match (x, y) {
+            (x, 0) => x,
+            (1, y) => y + 2,
+            _ => panic!("Implementation Error"),
+        }
+    }
+    /// Links edges moveing clockwise from edge1, counterclockwise from edge2
+    fn link_edges(&mut self, mut edge1: XYSide, mut edge2: XYSide, close: bool) {
+        // Given 2 starting edges, travelling clockwise along the first and
+        // counter-clockwise along the second will make them match properly
+        // moving to the right of the side specified
+
+        // doing it this way to prevent x/y indexes from going <0
+        let mut i = 0;
+        loop{
+            let ind1 = self.edge_index(&edge1);
+            let ind2 = self.edge_index(&edge2);
+            assert!(ind1<self.edges.len());
+            assert!(ind2<self.edges.len());
+            if close {
+                self.edges[ind1] = ConnEntry::NO_CONNECT;
+                self.edges[ind2] = ConnEntry::NO_CONNECT;
+            } else {
+                self.edges[ind1] = ConnEntry {
+                    conn: Conn::Maybe,
+                    connected_to: ind2 as u16,
+                };
+                self.edges[ind2] = ConnEntry {
+                    conn: Conn::Maybe,
+                    connected_to: ind1 as u16,
+                };
+            }
+            i += 1;
+            if i == self.size{
+                break
+            }
+            match edge1.side {
+                // moving to the right of the side
+                Side::Right => edge1.y += 1,
+                Side::Up => edge1.x += 1,
+                Side::Left => edge1.y -= 1,
+                Side::Down => edge1.x -= 1,
+            }
+            match edge2.side {
+                // moving to the right of the side
+                Side::Right => edge2.y -= 1,
+                Side::Up => edge2.x -= 1,
+                Side::Left => edge2.y += 1,
+                Side::Down => edge2.x += 1,
+            }
+        }
+    }
+
+    fn link_top_bottom(&mut self, close: bool) {
+        let max_ind = self.size - 1;
+        self.link_edges(
+            XYSide {
+                x: 0,
+                y: 0,
+                side: Side::Up,
+            },
+            XYSide {
+                x: 0,
+                y: max_ind,
+                side: Side::Down,
+            },
+            close,
+        );
+    }
+    fn link_left_right(&mut self, close: bool) {
+        let max_ind = self.size - 1;
+        self.link_edges(
+            XYSide {
+                x: 0,
+                y: max_ind,
+                side: Side::Left,
+            },
+            XYSide {
+                x: max_ind,
+                y: max_ind,
+                side: Side::Right,
+            },
+            close,
+        );
+    }
+    fn edge_index(&self, edge: &XYSide) -> usize {
+        self.index_from_xy(edge.x, edge.y) * 4 + edge.side as usize
+    }
 }
 impl std::fmt::Display for Mosaic {
+    /// Formats the mosaic into a string
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{}",
-            self.data
+            self.tiles
                 .iter()
                 .map(|val| format!("{:x}", val))
                 .collect::<String>()
         )
     }
 }
-
-fn edge_index(index: usize, side: Side) -> usize {
-    index * 4 + side as usize
-}
-fn close_top_bottom(mut edges: Vec<ConnEntry>, width: usize) -> Vec<ConnEntry> {
-    let last_row = edges.len() / 4 - width;
-    for i in 0..width {
-        edges[edge_index(i, Side::Up)] = ConnEntry::NO_CONNECT;
-        edges[edge_index(last_row + i, Side::Down)] = ConnEntry::NO_CONNECT;
-    }
-    edges
-}
-fn close_sides(mut edges: Vec<ConnEntry>, width: usize, height: usize) -> Vec<ConnEntry> {
-    for row in 0..height {
-        edges[edge_index(row * width, Side::Left)] = ConnEntry::NO_CONNECT;
-        edges[edge_index(row * width + width - 1, Side::Right)] = ConnEntry::NO_CONNECT;
-    }
-    edges
-}
-fn link_sides(mut edges: Vec<ConnEntry>, width: usize, height: usize) -> Vec<ConnEntry> {
-    for row in 0..height {
-        let left_ind = edge_index(row * width, Side::Left);
-        let right_ind = edge_index(row * width + width - 1, Side::Right);
-        edges[left_ind] = ConnEntry {
-            conn: Conn::Maybe,
-            connected_index: right_ind as u16,
-        };
-        edges[right_ind] = ConnEntry {
-            conn: Conn::Maybe,
-            connected_index: left_ind as u16,
-        };
-    }
-    edges
-}
-fn link_top_bottom(mut edges: Vec<ConnEntry>, width: usize) -> Vec<ConnEntry> {
-    let last_row = edges.len() / 4 - width;
-    for col in 0..width {
-        let top_ind = edge_index(col, Side::Up);
-        let bottom_ind = edge_index(last_row + col, Side::Right);
-        edges[top_ind] = ConnEntry {
-            conn: Conn::Maybe,
-            connected_index: bottom_ind as u16,
-        };
-        edges[bottom_ind] = ConnEntry {
-            conn: Conn::Maybe,
-            connected_index: top_ind as u16,
-        };
-    }
-    edges
+/// Constructs the edge connections for cubic mosaics
+fn link_cubic_sides(mos: &mut Mosaic) {
+    use Side::*;
+    let sz = mos.size;
+    // 0 top to 5 left
+    mos.link_edges(
+        XYSide {
+            x: 0,
+            y: 0,
+            side: Up,
+        },
+        XYSide {
+            x: sz,
+            y: sz * 3,
+            side: Left,
+        },
+        false,
+    );
+    // 1 top to 5 bottom
+    mos.link_edges(
+        XYSide {
+            x: sz,
+            y: 0,
+            side: Up,
+        },
+        XYSide {
+            x: sz,
+            y: sz * 4 - 1,
+            side: Down,
+        },
+        false,
+    );
+    // 0 left to 4 left
+    mos.link_edges(
+        XYSide {
+            x: 0,
+            y: sz - 1,
+            side: Left,
+        },
+        XYSide {
+            x: sz,
+            y: sz * 2,
+            side: Left,
+        },
+        false,
+    );
+    // 3 left to 0 bottom
+    mos.link_edges(
+        XYSide {
+            x: sz,
+            y: sz * 2 - 1,
+            side: Left,
+        },
+        XYSide {
+            x: 0,
+            y: sz - 1,
+            side: Down,
+        },
+        false,
+    );
+    // 2 bottom to 3 right
+    mos.link_edges(
+        XYSide {
+            x: sz * 3 - 1,
+            y: sz - 1,
+            side: Down,
+        },
+        XYSide {
+            x: sz * 2 - 1,
+            y: sz * 2 - 1,
+            side: Right,
+        },
+        false,
+    );
+    // 4 right to 2 right
+    mos.link_edges(
+        XYSide {
+            x: 2 * sz - 1,
+            y: 2 * sz,
+            side: Right,
+        },
+        XYSide {
+            x: 3 * sz - 1,
+            y: sz - 1,
+            side: Right,
+        },
+        false,
+    );
+    // 5 right to 2 top
+    mos.link_edges(
+        XYSide {
+            x: 2 * sz - 1,
+            y: 3 * sz,
+            side: Right,
+        },
+        XYSide {
+            x: 3 * sz - 1,
+            y: 0,
+            side: Up,
+        },
+        false,
+    );
 }
