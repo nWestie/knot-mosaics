@@ -1,3 +1,5 @@
+use std::ops::Not;
+
 use crate::conn_table::*;
 use crate::*;
 
@@ -77,12 +79,12 @@ impl Mosaic {
             _ => todo!("Other types not implemented"),
         };
         if let MosaicVariant::Cubic { cubic_type } = mos.variant {
-            let non_zero_sides = CUBIC_TYPES[cubic_type];
+            let non_zero_sides = CUBIC_TYPES[cubic_type].sides;
             for i in 0..mos.tiles.len() {
                 let side_num = mos.cubic_get_side_num(i);
                 // for each tile not on the face for this cubic type
                 if !non_zero_sides.contains(&side_num) {
-                    mos.set_tile(i, 0);
+                    mos.set_tile(i, 12);
                 }
             }
         }
@@ -90,6 +92,10 @@ impl Mosaic {
     }
 
     pub fn set_tile(&mut self, index: usize, tile: u8) {
+        // never change 'locked empty' tiles
+        if self.tiles[index] == 12 {
+            return;
+        }
         self.tiles[index] = tile;
         for (i, conn) in TILE_CONNECTION_SIDES[tile as usize].iter().enumerate() {
             let edge_ind = index * 4 + i;
@@ -98,13 +104,17 @@ impl Mosaic {
             // only clear the connection when the current tile is < the tile it's connected to,
             // because tiles > than current are gaurunteed to be unset(=11)
             // connections are only set
-            if (conn_ind < self.edges.len()) && (edge_ind < conn_ind) {
+            if self.is_valid_edge(conn_ind) && (edge_ind < conn_ind) {
                 self.edges[edge_ind].conn = *conn;
                 self.edges[conn_ind].conn = *conn;
             }
         }
     }
     pub fn get_valid_tiles(&self, index: usize) -> &'static [u8] {
+        if self.tiles[index] == 12 {
+            // will always be no connections, no matter what it's next to.
+            return &[0];
+        }
         let right = self.get_neighbor_conn(index, Side::Right) as usize;
         let up = self.get_neighbor_conn(index, Side::Up) as usize;
         let left = self.get_neighbor_conn(index, Side::Left) as usize;
@@ -133,6 +143,9 @@ impl Mosaic {
     }
     pub fn get_len(&self) -> usize {
         self.len
+    }
+    fn is_valid_edge(&self, edge_ind: usize) -> bool {
+        edge_ind < self.edges.len()
     }
     fn index_to_xy(&self, mut index: usize) -> (usize, usize) {
         if !matches!(self.variant, MosaicVariant::Cubic { .. }) {
@@ -181,7 +194,7 @@ impl Mosaic {
                 let tile_ind = self.index_from_xy(x + 1, y);
                 match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
-                    0 | 2 | 3 | 6 => Conn::No,
+                    0 | 2 | 3 | 6 | 12 => Conn::No,
                     _ => Conn::Yes,
                 }
             }
@@ -189,7 +202,7 @@ impl Mosaic {
                 let tile_ind = self.index_from_xy(x, y - 1);
                 match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
-                    0 | 3 | 4 | 5 => Conn::No,
+                    0 | 3 | 4 | 5 | 12 => Conn::No,
                     _ => Conn::Yes,
                 }
             }
@@ -197,7 +210,7 @@ impl Mosaic {
                 let tile_ind = self.index_from_xy(x - 1, y);
                 match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
-                    0 | 1 | 4 | 6 => Conn::No,
+                    0 | 1 | 4 | 6 | 12 => Conn::No,
                     _ => Conn::Yes,
                 }
             }
@@ -205,7 +218,7 @@ impl Mosaic {
                 let tile_ind = self.index_from_xy(x, y + 1);
                 match self.tiles[tile_ind] {
                     11 => Conn::Maybe,
-                    0 | 1 | 2 | 5 => Conn::No,
+                    0 | 1 | 2 | 5 | 12 => Conn::No,
                     _ => Conn::Yes,
                 }
             }
@@ -228,11 +241,11 @@ impl Mosaic {
 
         // doing it this way to prevent x/y indexes from going <0
         let mut i = 0;
-        loop{
+        loop {
             let ind1 = self.edge_index(&edge1);
             let ind2 = self.edge_index(&edge2);
-            assert!(ind1<self.edges.len());
-            assert!(ind2<self.edges.len());
+            assert!(ind1 < self.edges.len());
+            assert!(ind2 < self.edges.len());
             if close {
                 self.edges[ind1] = ConnEntry::NO_CONNECT;
                 self.edges[ind2] = ConnEntry::NO_CONNECT;
@@ -247,8 +260,8 @@ impl Mosaic {
                 };
             }
             i += 1;
-            if i == self.size{
-                break
+            if i == self.size {
+                break;
             }
             match edge1.side {
                 // moving to the right of the side
@@ -320,102 +333,106 @@ impl std::fmt::Display for Mosaic {
 fn link_cubic_sides(mos: &mut Mosaic) {
     use Side::*;
     let sz = mos.size;
-    // 0 top to 5 left
-    mos.link_edges(
-        XYSide {
-            x: 0,
-            y: 0,
-            side: Up,
-        },
-        XYSide {
-            x: sz,
-            y: sz * 3,
-            side: Left,
-        },
-        false,
-    );
-    // 1 top to 5 bottom
-    mos.link_edges(
-        XYSide {
-            x: sz,
-            y: 0,
-            side: Up,
-        },
-        XYSide {
-            x: sz,
-            y: sz * 4 - 1,
-            side: Down,
-        },
-        false,
-    );
-    // 0 left to 4 left
-    mos.link_edges(
-        XYSide {
-            x: 0,
-            y: sz - 1,
-            side: Left,
-        },
-        XYSide {
-            x: sz,
-            y: sz * 2,
-            side: Left,
-        },
-        false,
-    );
-    // 3 left to 0 bottom
-    mos.link_edges(
-        XYSide {
-            x: sz,
-            y: sz * 2 - 1,
-            side: Left,
-        },
-        XYSide {
-            x: 0,
-            y: sz - 1,
-            side: Down,
-        },
-        false,
-    );
-    // 2 bottom to 3 right
-    mos.link_edges(
-        XYSide {
-            x: sz * 3 - 1,
-            y: sz - 1,
-            side: Down,
-        },
-        XYSide {
-            x: sz * 2 - 1,
-            y: sz * 2 - 1,
-            side: Right,
-        },
-        false,
-    );
-    // 4 right to 2 right
-    mos.link_edges(
-        XYSide {
-            x: 2 * sz - 1,
-            y: 2 * sz,
-            side: Right,
-        },
-        XYSide {
-            x: 3 * sz - 1,
-            y: sz - 1,
-            side: Right,
-        },
-        false,
-    );
-    // 5 right to 2 top
-    mos.link_edges(
-        XYSide {
-            x: 2 * sz - 1,
-            y: 3 * sz,
-            side: Right,
-        },
-        XYSide {
-            x: 3 * sz - 1,
-            y: 0,
-            side: Up,
-        },
-        false,
-    );
+    if let MosaicVariant::Cubic { cubic_type } = mos.variant {
+        let sides = CUBIC_TYPES[cubic_type].sides;
+        // 0 top to 5 left
+        mos.link_edges(
+            XYSide {
+                x: 0,
+                y: 0,
+                side: Up,
+            },
+            XYSide {
+                x: sz,
+                y: sz * 3,
+                side: Left,
+            },
+            // only link the sides if sides 0 and 5 are both used in this cubic-type
+            ([0, 5].iter().all(|a| sides.contains(a))).not(),
+        );
+        // 1 top to 5 bottom
+        mos.link_edges(
+            XYSide {
+                x: sz,
+                y: 0,
+                side: Up,
+            },
+            XYSide {
+                x: sz,
+                y: sz * 4 - 1,
+                side: Down,
+            },
+            ([1, 5].iter().all(|a| sides.contains(a))).not(),
+        );
+        // 0 left to 4 left
+        mos.link_edges(
+            XYSide {
+                x: 0,
+                y: sz - 1,
+                side: Left,
+            },
+            XYSide {
+                x: sz,
+                y: sz * 2,
+                side: Left,
+            },
+            ([0, 4].iter().all(|a| sides.contains(a))).not(),
+        );
+        // 3 left to 0 bottom
+        mos.link_edges(
+            XYSide {
+                x: sz,
+                y: sz * 2 - 1,
+                side: Left,
+            },
+            XYSide {
+                x: 0,
+                y: sz - 1,
+                side: Down,
+            },
+            ([3, 0].iter().all(|a| sides.contains(a))).not(),
+        );
+        // 2 bottom to 3 right
+        mos.link_edges(
+            XYSide {
+                x: sz * 3 - 1,
+                y: sz - 1,
+                side: Down,
+            },
+            XYSide {
+                x: sz * 2 - 1,
+                y: sz * 2 - 1,
+                side: Right,
+            },
+            ([2, 3].iter().all(|a| sides.contains(a))).not(),
+        );
+        // 4 right to 2 right
+        mos.link_edges(
+            XYSide {
+                x: 2 * sz - 1,
+                y: 2 * sz,
+                side: Right,
+            },
+            XYSide {
+                x: 3 * sz - 1,
+                y: sz - 1,
+                side: Right,
+            },
+            ([4, 2].iter().all(|a| sides.contains(a))).not(),
+        );
+        // 5 right to 2 top
+        mos.link_edges(
+            XYSide {
+                x: 2 * sz - 1,
+                y: 3 * sz,
+                side: Right,
+            },
+            XYSide {
+                x: 3 * sz - 1,
+                y: 0,
+                side: Up,
+            },
+            ([5, 2].iter().all(|a| sides.contains(a))).not(),
+        );
+    }
 }

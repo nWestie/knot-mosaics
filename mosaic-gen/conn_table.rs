@@ -19,6 +19,7 @@ pub const TILE_CONNECTION_SIDES: &[&[Conn]] = &[
     &[Yes, Yes, Yes, Yes],         // 9
     &[Yes, Yes, Yes, Yes],         // 10
     &[Maybe, Maybe, Maybe, Maybe], // 11 (the 'unknown' tile)
+    &[No, No, No, No],             // 12 (the 'locked 0' tile)
 ];
 
 // For Cubic mosaics, it can be useful to generate mosaics only using a specific set
@@ -33,15 +34,19 @@ pub const TILE_CONNECTION_SIDES: &[&[Conn]] = &[
 //       │ 5 │
 //       └───┘
 //
+pub struct CubicType {
+    pub name: &'static str,
+    pub sides: &'static [usize],
+}
 /// All unique combinations of cube sides (tivial single-side not included)
-pub const CUBIC_TYPES: &[&[usize]] = &[
-    &[0, 1],             // 0
-    &[0, 1, 2],          // 1
-    &[0, 1, 3],          // 2
-    &[1, 3, 4, 5],       // 3
-    &[0, 1, 2, 3],       // 4
-    &[0, 1, 2, 3, 4],    // 5
-    &[0, 1, 2, 3, 4, 5], // 6
+pub const CUBIC_TYPES: &[CubicType] = &[
+    CubicType{name:"2",sides:&[0, 1]},             
+    CubicType{name:"3_line",sides:&[0, 1, 2]},          
+    CubicType{name:"3_bent",sides:&[0, 1, 3]},          
+    CubicType{name:"4_line",sides:&[1, 3, 4, 5]},       
+    CubicType{name:"4_t",sides:&[0, 1, 2, 3]},       
+    CubicType{name:"5",sides:&[0, 1, 2, 3, 4]},    
+    CubicType{name:"6",sides:&[0, 1, 2, 3, 4, 5]}, 
 ];
 
 // Connection table for mosaic generation

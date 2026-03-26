@@ -34,7 +34,9 @@ impl MosaicVariant {
             MosaicVariant::Cylindrical => String::from("cyl"),
             MosaicVariant::Toric => String::from("toric"),
             MosaicVariant::Mobius => String::from("mobius"),
-            MosaicVariant::Cubic { cubic_type } => format!("cubic/var{cubic_type}"),
+            MosaicVariant::Cubic { cubic_type } => {
+                let name = conn_table::CUBIC_TYPES[*cubic_type].name;
+                format!("cubic/{name}")},
         }
     }
 }
@@ -66,15 +68,15 @@ struct CliArgs {
 }
 
 fn main() -> Result<()> {
-    // let args = CliArgs::parse();
     let args = CliArgs {
         mosaic_size: 2,
-        mosaic_type: MosaicVariant::Cubic { cubic_type: 6 },
+        mosaic_type: MosaicVariant::Cubic { cubic_type: 5 },
         max_lines: 50_000,
         base_dir: PathBuf::from("../data"),
         discard_crossings_below: 0,
         remove_loops: false,
     };
+    // let args = CliArgs::parse();
     let size: usize = args.mosaic_size;
     let folder_name = format!("{size}_{}", args.mosaic_type.dir_code());
     let output_folder = args.base_dir.join(folder_name);
