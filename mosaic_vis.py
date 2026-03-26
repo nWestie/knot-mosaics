@@ -9,7 +9,7 @@ from mosaic_util import *
 
 
 def main():
-    file = Path(askopenfilename(initialdir="."))
+    file = Path(askopenfilename(initialdir="./data"))
     if not file:
         exit()
 
@@ -52,7 +52,7 @@ def gen_png(mosaic_str: str, id: str, img_path: Path):
 def build_img(mosaic_tiles: list[int]) -> Image.Image:
     """Builds a PIL image from a set of mosaic tiles"""
     if not hasattr(build_img, "tiles"):
-        build_img.tiles = load_tile_imgs(True)
+        build_img.tiles = load_tile_imgs()
 
     tiles = build_img.tiles
     # border_size = 4
@@ -97,14 +97,13 @@ def index_to_xy(index: int, size: int, is_cubic: bool) -> tuple[int, int]:
     return (col, row)
 
 
-def load_tile_imgs(hi_res=False) -> dict[int, Image.Image]:
+def load_tile_imgs() -> dict[int, Image.Image]:
     tile_images = {}
-    for num in range(11):
-        file_name = f"tiles/{"hi-res/" if hi_res else ""}{num}.png"
+    for file in Path("tiles/").glob("t*.png"):
         try:
-            tile_images[num] = Image.open(file_name).convert("RGBA")
+            tile_images[int(file.stem[1:])] = Image.open(file).convert("RGBA")
         except FileNotFoundError:
-            print(f"Failed to load image {file_name}")
+            print(f"Failed to load image {file}")
             exit(-1)
     return tile_images
 
@@ -116,8 +115,10 @@ class ImageBrowser(tk.Tk):
 
         self.title("Image Browser")
         # self.geometry("900x600")
-        self.state("zoomed")
-
+        try:
+            self.state("zoomed")
+        except:
+            pass
         self.get_img = getter
         self.image_names: list[str] = image_names
         self.current_index = 0
