@@ -15,19 +15,28 @@ from sage_funcs import make_knot
 output_dir = Path(f"output/")
 
 
-def mosaic_dir(type: str, size: int):
+def mosaic_dir(type: str, size: int, cubic_type: str | None = None) -> Path:
     # get the input folder of mosaics
-    return Path(f"data/{size}_{type}")
+    path = Path(f"data/{size}_{type}")
+    if cubic_type and type == "cubic":
+        path /= cubic_type
+    return path
 
 
-def results_dir(type: str):
+def results_dir(type: str, cubic_type: str | None = None) -> Path:
     # get the output folder of intermediate results
-    return Path(f"data/{type}_res")
+    path = Path(f"data/{type}_res")
+    if cubic_type and type == "cubic":
+        path /= cubic_type
+    return path
 
 
-def img_dir(type: str):
+def img_dir(type: str, cubic_type: str | None = None) -> Path:
     # get the output folder for images
-    return output_dir / f"{type}_imgs"
+    path = output_dir / f"{type}_imgs"
+    if cubic_type and type == "cubic":
+        path /= cubic_type
+    return path
 
 
 @dataclass
@@ -92,13 +101,25 @@ def main():
         help="Type of cubic to pull results from, must match the folder path",
         type=str,
     )
+    parse.add_argument(
+        "-x",
+        "--no-clean-exit",
+        help="Don't run the watcher that allows clean partial exits. For scripting",
+        action="store_true",
+    )
     parse.set_defaults(func=run_catalog)
 
     merge = subs.add_parser("merge", help="merge result files with this ID string")
     merge.add_argument(
         "type", choices=M.parser_types.keys(), help="folder name in output & data"
     )
-    merge.set_defaults(func=handle_merge)
+    merge.add_argument(
+        "-c",
+        "--cubic-version",
+        help="Type of cubic to pull results from, must match the folder path",
+        type=str,
+    )
+    merge.set_defaults(func=combine_results)
 
     file = subs.add_parser("file", help="parse single file")
     file.add_argument("input_file", help="path of file to parse", type=Path)
@@ -107,10 +128,6 @@ def main():
     file.set_defaults(func=handle_file)
     args = parser.parse_args()
     args.func(args)
-
-
-def handle_merge(args):
-    combine_results(args.type)
 
 
 def handle_file(args):
@@ -122,24 +139,22 @@ def run_catalog(args):
     """Uses multiple processes to parse through a directory of mosaic files"""
     [type, size, redo] = [args.type, args.size, not args.keep_existing]
     builder: Callable[[str], M.NormMosaic] = M.parser_types[type]
-    inp_dir = mosaic_dir(type, size)
-    out_dir = results_dir(type)
-    if type == "cubic":
-        inp_dir /= args.cubic_version
-        out_dir /= args.cubic_version
+    inp_dir = mosaic_dir(type, size, args.cubic_version)
+    out_dir = results_dir(type, args.cubic_version)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
+    if not args.no_clean_exit:
 
-    def wait_for_key():
-        input()
-        print("stopping...", flush=True)
-        stop_event.set()
+        def wait_for_key():
+            input()
+            print("stopping...", flush=True)
+            stop_event.set()
 
-    print("Press Enter to stop submitting new tasks...\n")
-    key_thread = threading.Thread(target=wait_for_key, daemon=True)
-    key_thread.start()
+        print("Press Enter to stop submitting new tasks...\n")
+        key_thread = threading.Thread(target=wait_for_key, daemon=True)
+        key_thread.start()
 
     i = 0
     max_queue = 8
@@ -186,13 +201,20 @@ def run_catalog(args):
         print("fully shutdown now")
 
 
-def combine_results(mosaic_type: str):
+def combine_results(args):
     """Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
+
+    mosaic_type = args.type
+    builder = M.parser_types[args.type]
     # maps polynomial to knot result
     all_results: dict[str, KnotResult] = {}
 
     # merge results, keeping lowest tile number
-    results_folder = results_dir(mosaic_type)
+    results_folder = results_dir(mosaic_type, args.cubic_version)
+    if not results_folder.is_dir() or len(list(results_folder.iterdir())) == 0:
+        print(f"ERR: no results to merge for {results_folder}")
+        return
+    
     for file in results_folder.iterdir():
         results, complete = load_result_file(file)
         if not complete:
@@ -205,7 +227,7 @@ def combine_results(mosaic_type: str):
 
     # generate images
     print("writing file and images...")
-    imgs = img_dir(mosaic_type)
+    imgs = img_dir(mosaic_type, args.cubic_version)
     if imgs.exists():
         [f.unlink() for f in imgs.iterdir()]
     else:
@@ -215,7 +237,7 @@ def combine_results(mosaic_type: str):
     for polynomial, res in all_results.items():
         # yes, I'm re-running the ID/simplify steps.
         # But the alternative is to run knotID on all the result files...
-        mosaic = M.NormMosaic.build_cylindrical(res.mosaic_str)
+        mosaic = builder(res.mosaic_str)
         knot = M.traverse_mosaic(mosaic, prune_unknots=False)
         if type(knot) is M.NotAKnot:
             print(f"ERR: Not a Knot({type(knot)}): {res.mosaic_str}")
