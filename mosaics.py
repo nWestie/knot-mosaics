@@ -41,7 +41,7 @@ class NormMosaic:
     height: int
     nominal_size: int
     # mapping of connections at the edges
-    boundlinks: dict[tuple[int, int, int], MosaicConn]
+    edge_conns: dict[tuple[int, int, int], MosaicConn]
 
     connect_moves: ClassVar[list[Callable[[MosaicConn], MosaicConn]]] = [
         lambda p: MosaicConn(p.x + 1, p.y, 2),
@@ -61,7 +61,7 @@ class NormMosaic:
 
     def get_connecting_pos(self, pos: MosaicConn) -> MosaicConn | NotAKnot:
         # handle edge connections
-        if (res := self.boundlinks.get(pos.as_tup)) is not None:
+        if (res := self.edge_conns.get(pos.as_tup)) is not None:
             return res
 
         pos = self.connect_moves[pos.side](pos)
@@ -80,13 +80,11 @@ class NormMosaic:
     def build_cylindrical(cls, string: str) -> "NormMosaic":
         mosaic = cls.build_flat(string)
         # adding the left <-> right links
-        for i in range(mosaic.height):
-            if mosaic.get_tile(Pos(0, i)) in (0, 2, 3, 6):
-                continue  # no connections out the sides
-            edge1 = MosaicConn(0, i, 2)
-            edge2 = MosaicConn(mosaic.width - 1, i, 0)
-            mosaic.boundlinks[edge1.as_tup] = edge2
-            mosaic.boundlinks[edge2.as_tup] = edge1
+        [RIGHT, UP, LEFT, DOWN] = range(4)
+        sz = mosaic.width
+        link_sides(
+            MosaicConn(sz - 1, 0, RIGHT), MosaicConn(0, 0, LEFT), sz, mosaic.edge_conns
+        )
         return mosaic
 
     @classmethod
@@ -121,35 +119,8 @@ class NormMosaic:
             out_i = ind_from_xy(sz, sz + i)
             inp_i = sz * i + cube_len // 2
             tiles[out_i : out_i + sz] = cube_tiles[inp_i : inp_i + sz]
-        
-        # link interior corners - left
-        for i in range(sz):
-            tile = tiles[ind_from_xy(sz - 1 - i, sz - 1)]
-            # if this tile has a connection on the bottom
-            if 3 in connections_dict[tile].keys():
-                tiles[ind_from_xy(sz - 1 - i, sz + i)] = 3  # corner tile
-                for j in range(i):
-                    tiles[ind_from_xy(sz - 1 - i, sz + j)] = 6  # vertical
-                    tiles[ind_from_xy(sz - 1 - j, sz + i)] = 5  # horz
-        # link interior corners - right
-        for i in range(sz):
-            tile = tiles[ind_from_xy(sz * 2 + i, sz - 1)]
-            # if this tile has a connection on the bottom
-            if 3 in connections_dict[tile].keys():
-                tiles[ind_from_xy(sz * 2 + i, sz + i)] = 4  # corner tile
-                for j in range(i):
-                    tiles[ind_from_xy(sz * 2 + i, sz + j)] = 6  # vertical
-                    tiles[ind_from_xy(sz * 2 + j, sz + i)] = 5  # horz
 
-        # link vert sides
-        for i in range(sz * 2, sz * 4):
-            l_ind = ind_from_xy(sz, i)
-            r_ind = ind_from_xy(sz * 2 - 1, i)
-            if 2 in connections_dict[tiles[l_ind]].keys():
-                tiles[l_ind - sz : l_ind] = [5] * sz
-            if 0 in connections_dict[tiles[r_ind]].keys():
-                tiles[r_ind + 1 : r_ind + sz+1] = [5] * sz
-
+        # link edges
         edge_links = {}
         [RIGHT, UP, LEFT, DOWN] = range(4)
         # 0 top to 5 left
@@ -239,7 +210,7 @@ def traverse_mosaic(  # type: ignore
 ) -> list[list[int]] | NotAKnot:
     pos: MosaicConn = MosaicConn(0, 0, 0)
     # getting the first non-zero tile
-    while (tile := mosaic.get_tile(pos)) == 0:
+    while (tile := mosaic.get_tile(pos)) in [0, 12]:
         pos.x += 1
         if pos.x == mosaic.width:
             pos.x = 0
@@ -253,7 +224,9 @@ def traverse_mosaic(  # type: ignore
     # this should equal # of moves through the mosaic,
     # if it's a knot (meaning traversing will visit all tiles)
     # for a valid knot, this count should not be exceeded
-    exp_moves = count_tiles(mosaic.tiles) + len([t for t in mosaic.tiles if t >= 7])
+    exp_moves = count_tiles(mosaic.tiles) + len(
+        [t for t in mosaic.tiles if t in [7, 8, 9, 10]]
+    )
 
     # getting first side as a starting point
     pos.side = list(connections_dict[tile])[0]

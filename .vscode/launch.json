@@ -25,7 +25,8 @@
             "request": "launch",
             "program": "./main.py",
             "console": "integratedTerminal",
-            "args": "merge cyl", 
+            // "args": "file data/2_cubic/2/pt0000.txt test.txt cubic", 
+            "args": "parse 2 cubic --cubic-version 2", 
         },
     ]
 }

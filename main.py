@@ -61,11 +61,9 @@ class KnotResult:
         if self.tile_ct != other.tile_ct:
             return self.tile_ct < other.tile_ct
         # lower indexes preffered
-        return int(self.mosaic_str, 11) < int(other.mosaic_str, 11)
+        return int(self.mosaic_str, 16) < int(other.mosaic_str, 16)
         # TODO: Implement edge connections metric?
         # fewer edge connections preferred. Would be super annoying with only results
-
-
 
 
 def main():
@@ -88,6 +86,12 @@ def main():
         action="store_true",
         help="skip inputs that have existing results",
     )
+    parse.add_argument(
+        "-c",
+        "--cubic-version",
+        help="Type of cubic to pull results from, must match the folder path",
+        type=str,
+    )
     parse.set_defaults(func=run_catalog)
 
     merge = subs.add_parser("merge", help="merge result files with this ID string")
@@ -99,6 +103,7 @@ def main():
     file = subs.add_parser("file", help="parse single file")
     file.add_argument("input_file", help="path of file to parse", type=Path)
     file.add_argument("output_file", help="path to ouput results to", type=Path)
+    file.add_argument("type", help="type of mosaic", type=str)
     file.set_defaults(func=handle_file)
     args = parser.parse_args()
     args.func(args)
@@ -110,16 +115,18 @@ def handle_merge(args):
 
 def handle_file(args):
     # raise NotImplementedError("Implement for multi-type input")
-    catalog_file(args.input_file, args.output_file, M.NormMosaic.build_cylindrical)
+    catalog_file(args.input_file, args.output_file, M.parser_types[args.type])
 
 
 def run_catalog(args):
     """Uses multiple processes to parse through a directory of mosaic files"""
     [type, size, redo] = [args.type, args.size, not args.keep_existing]
     builder: Callable[[str], M.NormMosaic] = M.parser_types[type]
-
     inp_dir = mosaic_dir(type, size)
     out_dir = results_dir(type)
+    if type == "cubic":
+        inp_dir /= args.cubic_version
+        out_dir /= args.cubic_version
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Thread to wait for user input without blocking main tasks

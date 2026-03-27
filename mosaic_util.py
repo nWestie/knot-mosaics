@@ -19,5 +19,5 @@ def count_crossings(mosaic: str | list[int]) -> int:
 
 def count_tiles(mosaic: str | list[int]) -> int:
     if type(mosaic) is str:
-        return len([t for t in mosaic if t != "0"])
-    return len([t for t in mosaic if t != 0])
+        return len([t for t in mosaic if (t not in ['0','c'])])
+    return len([t for t in mosaic if (t not in [0, 12])])
