@@ -9,7 +9,7 @@ use std::io::Result;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::mosaics::Mosaic;
+use crate::{conn_table::CUBIC_TYPES, mosaics::Mosaic};
 use rolling_buff::{RollOver, RollingBufWriter};
 
 #[derive(PartialEq, clap::Subcommand, Debug)]
@@ -23,8 +23,8 @@ enum MosaicVariant {
     /// Mosaic with L/R edges stiched, but twisted (top-left -> bottom right)
     Mobius,
     Cubic {
-        #[arg(default_value_t = 6)]
-        cubic_type: usize,
+        #[arg(value_parser = clap::builder::PossibleValuesParser::new(CUBIC_TYPES.iter().map(|c|c.name)),)]
+        cubic_type: String,
     },
 }
 impl MosaicVariant {
@@ -35,8 +35,8 @@ impl MosaicVariant {
             MosaicVariant::Toric => String::from("toric"),
             MosaicVariant::Mobius => String::from("mobius"),
             MosaicVariant::Cubic { cubic_type } => {
-                let name = conn_table::CUBIC_TYPES[*cubic_type].name;
-                format!("cubic/{name}")},
+                format!("cubic/{cubic_type}")
+            }
         }
     }
 }
@@ -68,15 +68,17 @@ struct CliArgs {
 }
 
 fn main() -> Result<()> {
-    let args = CliArgs {
-        mosaic_size: 2,
-        mosaic_type: MosaicVariant::Cubic { cubic_type: 5 },
-        max_lines: 50_000,
-        base_dir: PathBuf::from("../data"),
-        discard_crossings_below: 0,
-        remove_loops: false,
-    };
-    // let args = CliArgs::parse();
+    // let args = CliArgs {
+    //     mosaic_size: 3,
+    //     mosaic_type: MosaicVariant::Cubic { cubic_type: "4_t" },
+    //     max_lines: 50_000,
+    //     base_dir: PathBuf::from("../data"),
+    //     discard_crossings_below: 0,
+    //     remove_loops: false,
+    // };
+    let args = CliArgs::parse();
+    dbg!(&args);
+    // panic!("AAHHH");
     let size: usize = args.mosaic_size;
     let folder_name = format!("{size}_{}", args.mosaic_type.dir_code());
     let output_folder = args.base_dir.join(folder_name);
@@ -90,9 +92,9 @@ fn main() -> Result<()> {
     mosaic_gen(&mut outbuf, mosaic)?;
     outbuf.flush()?;
 
-    print!(
-        "Generation complete! ({:.6} s)",
-        now.elapsed().as_secs_f64()
+    println!(
+        "- Completed in {:.6} s)",
+        now.elapsed().as_secs_f64(),
     );
     Ok(())
 }
@@ -152,5 +154,6 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
         // the weird max here is to handle the case of a 1x1 mosaic
         depth = std::cmp::max(1, depth) - 1;
     }
+    println!("Done - {mosaic_ct} mosaics generated");
     Ok(())
 }

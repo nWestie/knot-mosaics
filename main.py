@@ -78,7 +78,9 @@ class KnotResult:
 def main():
     parser = argparse.ArgumentParser()
     subs = parser.add_subparsers(help="mode to run in", required=True)
-    parser.add_argument("-i", "--images", help="Generate images", action="store_true")
+    parser.add_argument(
+        "-v", "--verbose", help="enable additional output", action="store_true"
+    )
 
     string = subs.add_parser("string", help="Parse a single string")
     string.add_argument("string", help="Determine knot type from string")
@@ -143,6 +145,9 @@ def run_catalog(args):
     out_dir = results_dir(type, args.cubic_version)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if not inp_dir.is_dir() or len(list(inp_dir.iterdir())) == 0:
+        print(f"ERR: no mosaics to process for {inp_dir}")
+        return
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
     if not args.no_clean_exit:
@@ -160,7 +165,7 @@ def run_catalog(args):
     max_queue = 8
     futures: dict[Future, int] = {}
     # spawning workers to parse files
-    with ProcessPoolExecutor(max_workers=6) as executor:
+    with ProcessPoolExecutor(max_workers=6, max_tasks_per_child=10) as executor:
         while not stop_event.is_set():
             # Printing status, consuming old results
             min_ind = min(futures.values() or (0,))
@@ -172,7 +177,7 @@ def run_catalog(args):
                 exp = res.exception()
                 if exp:
                     print(f"RESULT {ind} FAILS", flush=True)
-                else:
+                elif args.verbose:
                     print(f"Result {ind} done", flush=True)
 
             # Queueing new files
@@ -186,7 +191,8 @@ def run_catalog(args):
                 # if we're done all the files in the folder, exit
                 if not in_path.is_file():
                     break
-                print(f"Queued {in_path}", flush=True)
+                if args.verbose:
+                    print(f"Queued {in_path}", flush=True)
                 fut = executor.submit(catalog_file, in_path, out_path, builder)
                 futures[fut] = i - 1
             else:
@@ -206,15 +212,27 @@ def combine_results(args):
 
     mosaic_type = args.type
     builder = M.parser_types[args.type]
-    # maps polynomial to knot result
-    all_results: dict[str, KnotResult] = {}
 
-    # merge results, keeping lowest tile number
     results_folder = results_dir(mosaic_type, args.cubic_version)
     if not results_folder.is_dir() or len(list(results_folder.iterdir())) == 0:
         print(f"ERR: no results to merge for {results_folder}")
         return
-    
+
+    imgs = img_dir(mosaic_type, args.cubic_version)
+    if imgs.exists():
+        [f.unlink() for f in imgs.iterdir()]
+    else:
+        imgs.mkdir(parents=True)
+
+    out_file = (
+        output_dir
+        / f"{mosaic_type}_{args.cubic_version+"_" if mosaic_type == "cubic" else ""}results.txt"
+    )
+    # maps polynomial to knot result
+    all_results: dict[str, KnotResult] = {}
+
+    # merge results, keeping lowest tile number
+
     for file in results_folder.iterdir():
         results, complete = load_result_file(file)
         if not complete:
@@ -227,11 +245,6 @@ def combine_results(args):
 
     # generate images
     print("writing file and images...")
-    imgs = img_dir(mosaic_type, args.cubic_version)
-    if imgs.exists():
-        [f.unlink() for f in imgs.iterdir()]
-    else:
-        imgs.mkdir(parents=True)
     # tuples of (knotID, polynomial)
     knot_ids: list[tuple[str, KnotResult]] = []
     for polynomial, res in all_results.items():
@@ -260,7 +273,6 @@ def combine_results(args):
     # generate output file
     knot_ids.sort(key=lambda k: k[0])
     padding = max(len(k) for k, _ in knot_ids) + 1
-    out_file = output_dir / f"{mosaic_type}_results.txt"
     with out_file.open("w") as out:
         for id, res in knot_ids:
             out.write(f"{id.ljust(padding)}|{res.to_str()}\n")

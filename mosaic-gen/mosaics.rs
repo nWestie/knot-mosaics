@@ -78,8 +78,8 @@ impl Mosaic {
             }
             _ => todo!("Other types not implemented"),
         };
-        if let MosaicVariant::Cubic { cubic_type } = mos.variant {
-            let non_zero_sides = CUBIC_TYPES[cubic_type].sides;
+        if let MosaicVariant::Cubic { cubic_type } = &mos.variant {
+            let non_zero_sides = cubic_from_name(cubic_type).unwrap().sides;
             for i in 0..mos.tiles.len() {
                 let side_num = mos.cubic_get_side_num(i);
                 // for each tile not on the face for this cubic type
@@ -333,8 +333,8 @@ impl std::fmt::Display for Mosaic {
 fn link_cubic_sides(mos: &mut Mosaic) {
     use Side::*;
     let sz = mos.size;
-    if let MosaicVariant::Cubic { cubic_type } = mos.variant {
-        let sides = CUBIC_TYPES[cubic_type].sides;
+    if let MosaicVariant::Cubic { cubic_type } = &mos.variant {
+        let sides = cubic_from_name(cubic_type).unwrap().sides;
         // 0 top to 5 left
         mos.link_edges(
             XYSide {

@@ -48,6 +48,9 @@ pub const CUBIC_TYPES: &[CubicType] = &[
     CubicType{name:"5",sides:&[0, 1, 2, 3, 4]},    
     CubicType{name:"6",sides:&[0, 1, 2, 3, 4, 5]}, 
 ];
+pub fn cubic_from_name(name: &str)->Option<&CubicType>{
+    CUBIC_TYPES.iter().find(|c|c.name == name)
+}
 
 // Connection table for mosaic generation
 
