@@ -5,23 +5,22 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 from tkinter.filedialog import askopenfilename
 from matplotlib import pyplot as plt
+from mosaics import NormMosaic, parser_types
 from mosaic_util import *
 
 
-def main():
-    file = Path(askopenfilename(initialdir="./data"))
-    if not file:
-        exit()
+def main_browser():
+    # file = Path(askopenfilename(initialdir="./data"))
+    # if not file:
+    #     exit()
+    file = Path("./data/2_cubic/3_bent/pt0000.txt")
+    ImageBrowser.from_mosaic_file(file, parser_types["cubic"] ).mainloop()
+    # ImageBrowser.from_strings(["0021127a98883434"], parser_types["cubic"]).mainloop()
 
-    ImageBrowser.from_mosaic_file(file).mainloop()
-    # ImageBrowser.from_strings(["000000212121989766663400","0021127a98883434"]).mainloop()
 
-
-def gen_png(mosaic_str: str, id: str, img_path: Path):
+def gen_png(mosaic: NormMosaic,mosaic_str:str, id: str, img_path: Path):
     """Builds a PNG with metadata shown above/below mosaic"""
-    matrix = string2matrix(mosaic_str)
-    img = build_img(matrix)
-
+    img = build_img(mosaic)
     dpi: int = 300
 
     fig, ax = plt.subplots(
@@ -49,51 +48,31 @@ def gen_png(mosaic_str: str, id: str, img_path: Path):
     plt.savefig(img_path, bbox_inches="tight")
     plt.close(fig)
 
-def build_img(mosaic_tiles: list[int]) -> Image.Image:
+def build_img(mosaic: NormMosaic) -> Image.Image:
     """Builds a PIL image from a set of mosaic tiles"""
     if not hasattr(build_img, "tiles"):
         build_img.tiles = load_tile_imgs()
 
     tiles = build_img.tiles
-    # border_size = 4
-    # border_color = (196, 196, 196, 255)
-    grid_size = len(mosaic_tiles) ** 0.5
-    is_cubic = False
-    if grid_size == int(grid_size):
-        grid_size = int(grid_size)
-        width = height = grid_size
-    else:
-        grid_size = (len(mosaic_tiles) / 6) ** 0.5
-        grid_size = int(grid_size)
-        width = grid_size * 3
-        height = grid_size * 4
-        is_cubic = True
     tile_size = tiles[0].width
 
-    out_img = Image.new("RGB", (tile_size * width, tile_size * height), "white")
+    out_img = Image.new("RGB", (tile_size * mosaic.width, tile_size * mosaic.height), "white")
 
-    for i, tile in enumerate(mosaic_tiles):
-        x, y = index_to_xy(i, grid_size, is_cubic)
+    for i, tile in enumerate(mosaic.tiles):
+        x, y = index_to_xy(i, mosaic.width)
         out_img.paste(tiles[tile], (x * tile_size, y * tile_size))
 
     return out_img
 
+def show_img(img: Image.Image):
+    ax = plt.axes()
+    ax.imshow(img)
+    ax.axis("off")
 
-def index_to_xy(index: int, size: int, is_cubic: bool) -> tuple[int, int]:
-    if not is_cubic:
-        col = index % size
-        row = math.floor(index / size)
-        return (col, row)
-    cubic_len = size * size * 6
-    # handle cubic
-    if index < (cubic_len / 2):
-        col = index % (size * 3)
-        row = math.floor(index / (size * 3))
-        return (col, row)
 
-    index -= int(cubic_len / 2)
-    col = index % size + size
-    row = math.floor((index / size) + size)
+def index_to_xy(index: int, width: int) -> tuple[int, int]:
+    col = index % width
+    row = math.floor(index / width)
     return (col, row)
 
 
@@ -201,22 +180,24 @@ class ImageBrowser(tk.Tk):
         return ImageBrowser(mosaics, getter)
 
     @classmethod
-    def from_mosaic_file(cls, file: Path):
+    def from_mosaic_file(cls, file: Path, parser):
         with open(file) as f:
             mosaics = [l.strip() for l in f.readlines()]
 
-        def getter(mosaic: str):
-            return build_img(string2matrix(mosaic))
+        def getter(mosaic_str: str):
+            mosaic: NormMosaic = parser(mosaic_str)
+            return build_img(mosaic)
 
         return ImageBrowser(mosaics, getter)
 
     @classmethod
-    def from_strings(cls, strs: list[str]):
-        def getter(mosaic: str):
-            return build_img(string2matrix(mosaic))
+    def from_strings(cls, strs: list[str], parser):
+        def getter(mosaic_str: str):
+            mosaic: NormMosaic = parser(mosaic_str)
+            return build_img(mosaic)
 
         return ImageBrowser(strs, getter)
 
 
 if __name__ == "__main__":
-    exit(main())
+    exit(main_browser())

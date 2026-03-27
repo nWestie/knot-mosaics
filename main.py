@@ -9,10 +9,8 @@ from time import sleep, time
 from typing import Callable
 import mosaics as M
 import mosaic_vis as mvis
-
-# sage doesn't have type support ¯\_(ツ)_/¯
-from sage.all import Link, SR  # type:ignore
-
+from mosaic_util import *
+from sage_funcs import make_knot
 
 output_dir = Path(f"output/")
 
@@ -68,13 +66,6 @@ class KnotResult:
         # fewer edge connections preferred. Would be super annoying with only results
 
 
-parser_types = {
-    "flat": M.NormMosaic.build_flat,
-    "cyl": M.NormMosaic.build_cylindrical,
-    "toric": M.NormMosaic.build_toric,
-    "mobius": lambda _: print("NOT IMPLEMENTED"),
-    "cubic": lambda _: print("NOT IMPLEMENTED"),
-}
 
 
 def main():
@@ -84,13 +75,14 @@ def main():
 
     string = subs.add_parser("string", help="Parse a single string")
     string.add_argument("string", help="Determine knot type from string")
+    string.add_argument("type", choices=M.parser_types.keys(), help="type of mosaic")
     string.set_defaults(func=handle_str)
 
     parse = subs.add_parser(
         "parse", help="parse mosiacs in dir corresponding to this ID"
     )
     parse.add_argument("size", type=int, help="mosaic size")
-    parse.add_argument("type", choices=parser_types.keys(), help="type of mosaic")
+    parse.add_argument("type", choices=M.parser_types.keys(), help="type of mosaic")
     parse.add_argument(
         "--keep-existing",
         action="store_true",
@@ -100,7 +92,7 @@ def main():
 
     merge = subs.add_parser("merge", help="merge result files with this ID string")
     merge.add_argument(
-        "type", choices=parser_types.keys(), help="folder name in output & data"
+        "type", choices=M.parser_types.keys(), help="folder name in output & data"
     )
     merge.set_defaults(func=handle_merge)
 
@@ -124,10 +116,12 @@ def handle_file(args):
 def run_catalog(args):
     """Uses multiple processes to parse through a directory of mosaic files"""
     [type, size, redo] = [args.type, args.size, not args.keep_existing]
-    builder: Callable[[str], M.NormMosaic] = parser_types[type]
+    builder: Callable[[str], M.NormMosaic] = M.parser_types[type]
+
     inp_dir = mosaic_dir(type, size)
     out_dir = results_dir(type)
     out_dir.mkdir(parents=True, exist_ok=True)
+
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
 
@@ -219,8 +213,8 @@ def combine_results(mosaic_type: str):
         if type(knot) is M.NotAKnot:
             print(f"ERR: Not a Knot({type(knot)}): {res.mosaic_str}")
             break
-
-        new_knot = knot.simplify()  # type: ignore
+        knot = make_knot(knot)  # type:ignore
+        new_knot = knot.simplify()
         if new_knot is not None:
             knot = new_knot
         # this can be quite slow for some knots
@@ -229,7 +223,7 @@ def combine_results(mosaic_type: str):
         for s in ["KnotInfo", "[", "]", "'"]:
             knotid = knotid.replace(s, "")
         img_path = imgs / (f"{res.size}-{knotid}-{res.mosaic_str}.png")
-        mvis.gen_png(res.mosaic_str, knotid, img_path)
+        mvis.gen_png(mosaic, res.mosaic_str, knotid, img_path)
         print(f"saved: {img_path}")
 
         knot_ids.append((knotid, res))
@@ -283,7 +277,7 @@ def catalog_file(
                     case M.NotAKnot.BAD_CONNECTIONS:
                         bad_mosaics.append(f"{str(knot)}, {mosaic_str}\n")
                 continue
-
+            knot = make_knot(knot)  # type:ignore
             new_knot = knot.simplify()  # type: ignore # probably expensive?
             if new_knot:
                 knot = new_knot
@@ -303,7 +297,7 @@ def catalog_file(
     if len(bad_mosaics):
         print(f"Bad Mosaics in {in_file}", flush=True)
     with out_file.open("w") as out:
-        lines = [(r.to_str()+"\n") for r in knot_bank.values()]
+        lines = [(r.to_str() + "\n") for r in knot_bank.values()]
         out.writelines(lines)
         out.write("END_RESULT")
 
@@ -317,12 +311,14 @@ def catalog_file(
 
 def handle_str(args):
     mosaic_str: str = args.string
-    mosaic = M.NormMosaic.build_cylindrical(mosaic_str)
+    builder = M.parser_types[args.type]
+    mosaic = builder(mosaic_str)
+
     knot = M.traverse_mosaic(mosaic)
     if type(knot) is str:
         print(f"Bad Mosaic: {mosaic_str}")
         return
-
+    knot = make_knot(knot)  # type: ignore
     if not knot or not knot.is_knot():  # type:ignore
         print("Mosaic is not a knot")
         return
@@ -333,7 +329,7 @@ def handle_str(args):
     print(f"{mosaic_str} || {knotinfo} || {polynomial}")
 
     img_path = Path(f"output/other_img/{mosaic_str.strip()}.png")
-    mvis.gen_png(mosaic_str, knotinfo, img_path)
+    mvis.gen_png(mosaic, mosaic_str, knotinfo, img_path)
 
 
 if __name__ == "__main__":

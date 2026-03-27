@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum
 from math import sqrt
+import math
 from operator import xor
 from typing import ClassVar, Callable
-from sage.all import Link  # type:ignore
 from mosaic_util import *
 
 
@@ -60,7 +60,7 @@ class NormMosaic:
         return (0 <= pos.x < self.width) and (0 <= pos.y < self.height)
 
     def get_connecting_pos(self, pos: MosaicConn) -> MosaicConn | NotAKnot:
-        # handle conn loops
+        # handle edge connections
         if (res := self.boundlinks.get(pos.as_tup)) is not None:
             return res
 
@@ -72,7 +72,7 @@ class NormMosaic:
 
     @classmethod
     def build_flat(cls, string: str) -> "NormMosaic":
-        tiles = string2matrix(string)
+        tiles = string2tiles(string)
         size = int(sqrt(len(tiles)))
         return NormMosaic(tiles, size, size, size, {})
 
@@ -103,13 +103,140 @@ class NormMosaic:
             mosaic.boundlinks[b2.as_tup] = b1
         return mosaic
 
+    @classmethod
+    def build_cubic(cls, string: str) -> "NormMosaic":
+        cube_tiles = string2tiles(string)
+        cube_len = len(cube_tiles)
+        sz = int(math.sqrt(cube_len / 6))
+        width = sz * 3
+        height = sz * 4
+        tiles = [12] * (width * height)
+
+        # move tiles to their grid positions
+        def ind_from_xy(x, y):
+            return y * width + x
+
+        tiles[0 : cube_len // 2] = cube_tiles[0 : cube_len // 2]
+        for i in range(sz * 3):
+            out_i = ind_from_xy(sz, sz + i)
+            inp_i = sz * i + cube_len // 2
+            tiles[out_i : out_i + sz] = cube_tiles[inp_i : inp_i + sz]
+        
+        # link interior corners - left
+        for i in range(sz):
+            tile = tiles[ind_from_xy(sz - 1 - i, sz - 1)]
+            # if this tile has a connection on the bottom
+            if 3 in connections_dict[tile].keys():
+                tiles[ind_from_xy(sz - 1 - i, sz + i)] = 3  # corner tile
+                for j in range(i):
+                    tiles[ind_from_xy(sz - 1 - i, sz + j)] = 6  # vertical
+                    tiles[ind_from_xy(sz - 1 - j, sz + i)] = 5  # horz
+        # link interior corners - right
+        for i in range(sz):
+            tile = tiles[ind_from_xy(sz * 2 + i, sz - 1)]
+            # if this tile has a connection on the bottom
+            if 3 in connections_dict[tile].keys():
+                tiles[ind_from_xy(sz * 2 + i, sz + i)] = 4  # corner tile
+                for j in range(i):
+                    tiles[ind_from_xy(sz * 2 + i, sz + j)] = 6  # vertical
+                    tiles[ind_from_xy(sz * 2 + j, sz + i)] = 5  # horz
+
+        # link vert sides
+        for i in range(sz * 2, sz * 4):
+            l_ind = ind_from_xy(sz, i)
+            r_ind = ind_from_xy(sz * 2 - 1, i)
+            if 2 in connections_dict[tiles[l_ind]].keys():
+                tiles[l_ind - sz : l_ind] = [5] * sz
+            if 0 in connections_dict[tiles[r_ind]].keys():
+                tiles[r_ind + 1 : r_ind + sz+1] = [5] * sz
+
+        edge_links = {}
+        [RIGHT, UP, LEFT, DOWN] = range(4)
+        # 0 top to 5 left
+        link_sides(MosaicConn(0, 0, UP), MosaicConn(sz, sz * 3, LEFT), sz, edge_links)
+        # 1 top to 5 bottom
+        link_sides(
+            MosaicConn(sz, 0, UP), MosaicConn(sz, sz * 4 - 1, DOWN), sz, edge_links
+        )
+        # 0 left to 4 left
+        link_sides(
+            MosaicConn(0, sz - 1, LEFT),
+            MosaicConn(sz, sz * 2, LEFT),
+            sz,
+            edge_links,
+        )
+        # 3 left to 0 bottom
+        link_sides(
+            MosaicConn(sz, sz * 2 - 1, LEFT),
+            MosaicConn(0, sz - 1, DOWN),
+            sz,
+            edge_links,
+        )
+        # 2 bottom to 3 right
+        link_sides(
+            MosaicConn(sz * 3 - 1, sz - 1, DOWN),
+            MosaicConn(sz * 2 - 1, sz * 2 - 1, RIGHT),
+            sz,
+            edge_links,
+        )
+        # 4 right to 2 right
+        link_sides(
+            MosaicConn(sz * 2 - 1, sz * 2, RIGHT),
+            MosaicConn(sz * 3 - 1, sz - 1, RIGHT),
+            sz,
+            edge_links,
+        )
+        # 5 right to 2 top
+        link_sides(
+            MosaicConn(sz * 2 - 1, sz * 3, RIGHT),
+            MosaicConn(sz * 3 - 1, 0, UP),
+            sz,
+            edge_links,
+        )
+        return NormMosaic(tiles, width, height, sz, edge_links)
+
+
+parser_types: dict[str, Callable[[str], NormMosaic]] = {
+    "flat": NormMosaic.build_flat,
+    "cyl": NormMosaic.build_cylindrical,
+    "toric": NormMosaic.build_toric,
+    # "mobius": lambda _: print("NOT IMPLEMENTED"),
+    "cubic": NormMosaic.build_cubic,
+}
+
+
+def link_sides(
+    e1: MosaicConn,
+    e2: MosaicConn,
+    len: int,
+    links: dict[tuple[int, int, int], MosaicConn],
+):
+    clockwise = [
+        lambda p: MosaicConn(p.x, p.y + 1, 0),
+        lambda p: MosaicConn(p.x + 1, p.y, 1),
+        lambda p: MosaicConn(p.x, p.y - 1, 2),
+        lambda p: MosaicConn(p.x - 1, p.y, 3),
+    ]
+    counter_clockwise = [
+        lambda p: MosaicConn(p.x, p.y - 1, 0),
+        lambda p: MosaicConn(p.x - 1, p.y, 1),
+        lambda p: MosaicConn(p.x, p.y + 1, 2),
+        lambda p: MosaicConn(p.x + 1, p.y, 3),
+    ]
+    for _ in range(len):
+        links[e1.as_tup] = e2
+        links[e2.as_tup] = e1
+
+        e1 = clockwise[e1.side](e1)
+        e2 = counter_clockwise[e2.side](e2)
+
 
 def traverse_mosaic(  # type: ignore
     mosaic: NormMosaic,
     prune_links: bool = True,
     prune_unknots: bool = True,
     classify_only: bool = False,
-) -> Link | NotAKnot:
+) -> list[list[int]] | NotAKnot:
     pos: MosaicConn = MosaicConn(0, 0, 0)
     # getting the first non-zero tile
     while (tile := mosaic.get_tile(pos)) == 0:
@@ -153,7 +280,7 @@ def traverse_mosaic(  # type: ignore
         pos.side = out_side
         res = mosaic.get_connecting_pos(pos)
         if type(res) is not MosaicConn:
-            return res
+            return res  # type: ignore
         pos = res
         if pos.as_tup == start_pos:
             break
@@ -179,20 +306,22 @@ def traverse_mosaic(  # type: ignore
         pd_code = [(1 if i > max_edge else i) for i in pd_code]
         pd_codes.append(pd_code)
 
-    return NotAKnot.GOODKNOT if classify_only else Link(pd_codes)
+    return NotAKnot.GOODKNOT if classify_only else pd_codes
 
 
+# Dictionary of each tile side
 connections_dict: list[dict[int, int]] = [
-    {},
-    {2: 3, 3: 2},
-    {0: 3, 3: 0},
-    {0: 1, 1: 0},
-    {2: 1, 1: 2},
-    {2: 0, 0: 2},
-    {1: 3, 3: 1},
-    {2: 3, 3: 2, 1: 0, 0: 1},
-    {0: 3, 3: 0, 2: 1, 1: 2},
-    {0: 2, 1: 3, 2: 0, 3: 1},
-    {0: 2, 1: 3, 2: 0, 3: 1},
-    {0: 2, 1: 3, 2: 0, 3: 1},
+    {},  # 0
+    {2: 3, 3: 2},  # 1
+    {0: 3, 3: 0},  # 2
+    {0: 1, 1: 0},  # 3
+    {2: 1, 1: 2},  # 4
+    {2: 0, 0: 2},  # 5
+    {1: 3, 3: 1},  # 6
+    {2: 3, 3: 2, 1: 0, 0: 1},  # 7
+    {0: 3, 3: 0, 2: 1, 1: 2},  # 8
+    {0: 2, 1: 3, 2: 0, 3: 1},  # 9
+    {0: 2, 1: 3, 2: 0, 3: 1},  # 10
+    {},  # 11
+    {},  # 12
 ]

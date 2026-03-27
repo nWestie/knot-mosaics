@@ -1,10 +1,13 @@
-def string2matrix(string: str) -> list[int]:
+from typing import Callable
+
+
+def string2tiles(string: str) -> list[int]:
     """convert each char in the string to an int,
     using hex conversion to properly convert 'a' to 11"""
     return [int(elem, base=16) for elem in string.strip()]
 
 
-def matrix2string(matrix: list[int]) -> str:
+def tiles2string(matrix: list[int]) -> str:
     return "".join(f"{t:x}" for t in matrix)
 
 

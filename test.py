@@ -10,7 +10,7 @@ import mosaics as mos
 
 
 def show_str(mosaic: str):
-    mat = mvis.string2matrix(mosaic)
+    mat = mvis.string2tiles(mosaic)
     img = mvis.build_img(mat)
     plt.ion()
     plt.imshow(img)
