@@ -15,7 +15,7 @@ pub enum RollOver {
 }
 
 impl RollingBufWriter {
-    pub fn new<P: AsRef<Path>>(base_path: P, max_lines: usize) -> io::Result<Self> {
+    pub fn new<P: AsRef<Path>>(base_path: &P, max_lines: usize) -> io::Result<Self> {
         let base_path = base_path.as_ref().to_path_buf();
         let writer = Self::open_file(&base_path, 0)?;
 

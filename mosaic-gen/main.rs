@@ -69,8 +69,8 @@ struct CliArgs {
 
 fn main() -> Result<()> {
     // let args = CliArgs {
-    //     mosaic_size: 3,
-    //     mosaic_type: MosaicVariant::Cubic { cubic_type: "4_t" },
+    //     mosaic_size: 1,
+    //     mosaic_type: MosaicVariant::Cubic { cubic_type: String::from("6") },
     //     max_lines: 50_000,
     //     base_dir: PathBuf::from("../data"),
     //     discard_crossings_below: 0,
@@ -78,7 +78,6 @@ fn main() -> Result<()> {
     // };
     let args = CliArgs::parse();
     dbg!(&args);
-    // panic!("AAHHH");
     let size: usize = args.mosaic_size;
     let folder_name = format!("{size}_{}", args.mosaic_type.dir_code());
     let output_folder = args.base_dir.join(folder_name);
@@ -87,11 +86,13 @@ fn main() -> Result<()> {
     println!("generating ...");
 
     create_dir_all(&output_folder)?;
-    let mut outbuf = RollingBufWriter::new(output_folder, args.max_lines)?;
+    let mut outbuf = RollingBufWriter::new(&output_folder, args.max_lines)?;
     let mosaic = Mosaic::new(size, args.mosaic_type);
     mosaic_gen(&mut outbuf, mosaic)?;
     outbuf.flush()?;
-
+    
+    let path = output_folder.join("COMPLETED");
+    std::fs::File::create(path)?;
     println!(
         "- Completed in {:.6} s)",
         now.elapsed().as_secs_f64(),
@@ -109,6 +110,10 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
         // moving to the next branch at <depth>
         if let Some(first) = branches[depth].pop() {
             mosaic.set_tile(depth, first);
+            // this does not hit at all for cubic?? Likely because the only metric is
+            if mosaic.is_trivial(){
+                continue; // this will go to next branch at same depth
+            }
             depth += 1;
         } else {
             // if all branches explored, back out a level
@@ -125,6 +130,11 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
             branches[depth].reverse();
             if let Some(item) = branches[depth].pop() {
                 mosaic.set_tile(depth, item);
+                // TODO: Possibly skipping logic here too?
+                if mosaic.is_trivial(){
+                    // this moves to the next branch at this depth.
+                    continue 'outer
+                }
                 depth += 1
             } else {
                 mosaic.set_tile(depth, 11);
@@ -157,3 +167,5 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
     println!("Done - {mosaic_ct} mosaics generated");
     Ok(())
 }
+
+

@@ -122,25 +122,6 @@ impl Mosaic {
         let hash = down * 27 + left * 9 + up * 3 + right;
         CONNS_TO_VALID_TILES[hash]
     }
-    /// returns true for any mosaics with a row that is a simple loop.
-    #[allow(unused)]
-    pub fn has_loop(&self) -> bool {
-        if matches!(self.variant, MosaicVariant::Cubic { .. }) {
-            todo!("Not Implemented for  cubic");
-        }
-        let sz = self.size;
-        'row_loop: for row in 0..sz {
-            for col in 0..sz {
-                let item = self.get_tile_xy(col, row);
-                if !matches!(item, 5 | 9 | 10) {
-                    // contine to next row if any item doesn't have a horizontal connection
-                    continue 'row_loop;
-                }
-            }
-            return true;
-        }
-        false
-    }
     pub fn get_len(&self) -> usize {
         self.len
     }
@@ -223,6 +204,62 @@ impl Mosaic {
                 }
             }
         }
+    }
+
+    pub fn is_trivial(&self) -> bool {
+        // Removes mosaics that are not important or not what is desired
+        use MosaicVariant as MV;
+
+        match &self.variant {
+            MV::Cubic { cubic_type } => {
+                // removes cubic mosaics using less sides than specified
+                let mut has_side = [false; 6];
+                let mut cross_ct = 0;
+                for i in 0..self.get_len() {
+                    // Note that tile 11, the 'not yet assigned' tile, is not included
+                    // Sides with undetermined tiles are considered occupied,
+                    // so that this works properly for in-progress mosaics
+                    let tile = &self.tiles[i];
+                    if !([0, 12].contains(tile)) {
+                        let side = self.cubic_get_side_num(i);
+                        has_side[side] = true;
+                    }
+                    if [9, 10, 11].contains(tile) {
+                        // because this is evaluated on incomplete mosaics, we must assume they could have a crossing
+                        cross_ct += 1;
+                    }
+                }
+                if cross_ct < 3{
+                    return true;
+                }
+                let ct = has_side.iter().filter(|s| **s).count();
+                ct < cubic_from_name(cubic_type).unwrap().sides.len()
+            }
+            _ => todo!("Only implemented for cubic rn"),
+        }
+    }
+    /// returns true for any mosaics with a row that is a simple loop.
+    #[allow(unused)]
+    fn has_trivial_horz_loop(&self) -> bool {
+        if matches!(self.variant, MosaicVariant::Cubic { .. }) {
+            todo!("Not Implemented for  cubic");
+        }
+        let sz = self.size;
+        'row_loop: for row in 0..sz {
+            for col in 0..sz {
+                let item = self.get_tile_xy(col, row);
+                if !matches!(item, 5 | 9 | 10) {
+                    // contine to next row if any item doesn't have a horizontal connection
+                    continue 'row_loop;
+                }
+            }
+            return true;
+        }
+        false
+    }
+    #[allow(unused)]
+    fn has_trivial_vert_loop(&self) -> bool {
+        todo!("Check for trivial loops")
     }
     fn cubic_get_side_num(&self, index: usize) -> usize {
         let (x, y) = self.index_to_xy(index);
