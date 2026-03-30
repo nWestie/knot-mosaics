@@ -40,6 +40,22 @@ impl MosaicVariant {
         }
     }
 }
+impl std::fmt::Display for MosaicVariant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.dir_code())
+    }
+}
+#[derive(clap::Args, Debug)]
+struct Filters {
+    // mosaics with < this number of crossings will not be saved
+    // set to zero to include all mosaics
+    /// discard knots with less than N crossings
+    #[arg(short, long, default_value_t = 3)]
+    discard_crossings_below: usize,
+    /// discard mosaics that contain trivial loops
+    #[arg(short, long)]
+    remove_loops: bool,
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -50,28 +66,21 @@ struct CliArgs {
     #[command(subcommand)]
     mosaic_type: MosaicVariant,
     /// Max lines in each output file
-    #[arg(short, long, default_value_t = 50_000)]
+    #[arg(short, long, default_value_t = 100_000)]
     max_lines: usize,
     /// Folder to put output
     #[arg(short, long, default_value_os_t =PathBuf::from("../data/"))]
     base_dir: PathBuf,
-    // mosaics with <= this number of crossings will not be saved
-    // for 5 crossings, we don't need anything <= 5
-    // for 4 crossings, anything <=2
-    // set to zero to include all mosaics
-    /// discard knots with less than N crossings
-    #[arg(short, long, default_value_t = 0)]
-    discard_crossings_below: usize,
-    /// discard mosaics that contain trivial loops
-    #[arg(short, long)]
-    remove_loops: bool,
+
+    #[command[flatten]]
+    filters: Filters,
 }
 
 fn main() -> Result<()> {
     // let args = CliArgs {
     //     mosaic_size: 1,
     //     mosaic_type: MosaicVariant::Cubic { cubic_type: String::from("6") },
-    //     max_lines: 50_000,
+    //     max_lines: 100_000,
     //     base_dir: PathBuf::from("../data"),
     //     discard_crossings_below: 0,
     //     remove_loops: false,
@@ -86,21 +95,18 @@ fn main() -> Result<()> {
     println!("generating ...");
 
     create_dir_all(&output_folder)?;
-    let mut outbuf = RollingBufWriter::new(&output_folder, args.max_lines)?;
     let mosaic = Mosaic::new(size, args.mosaic_type);
-    mosaic_gen(&mut outbuf, mosaic)?;
+    let mut outbuf = RollingBufWriter::new(&output_folder, args.max_lines, mosaic.get_len())?;
+    mosaic_gen(&mut outbuf, mosaic, args.filters)?;
     outbuf.flush()?;
-    
+
     let path = output_folder.join("COMPLETED");
     std::fs::File::create(path)?;
-    println!(
-        "- Completed in {:.6} s)",
-        now.elapsed().as_secs_f64(),
-    );
+    println!("- Completed in {:.6} s)", now.elapsed().as_secs_f64(),);
     Ok(())
 }
 
-fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()> {
+fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic, filters: Filters) -> Result<()> {
     let mut branches: Vec<Vec<u8>> = vec![vec![]; mosaic.get_len()];
     let mut mosaic_ct = 0;
     let mut depth = 0;
@@ -111,7 +117,7 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
         if let Some(first) = branches[depth].pop() {
             mosaic.set_tile(depth, first);
             // this does not hit at all for cubic?? Likely because the only metric is
-            if mosaic.is_trivial(){
+            if mosaic.is_trivial(&filters) {
                 continue; // this will go to next branch at same depth
             }
             depth += 1;
@@ -131,9 +137,9 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
             if let Some(item) = branches[depth].pop() {
                 mosaic.set_tile(depth, item);
                 // TODO: Possibly skipping logic here too?
-                if mosaic.is_trivial(){
+                if mosaic.is_trivial(&filters) {
                     // this moves to the next branch at this depth.
-                    continue 'outer
+                    continue 'outer;
                 }
                 depth += 1
             } else {
@@ -149,9 +155,9 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
             mosaic_ct += 1;
             if let RollOver::Rolled(index) = res {
                 println!(
-                    "on pt{index} - {} generated, {} saved",
+                    "{}: on pt{index} - {} generated",
+                    mosaic.description_str(),
                     format_num!(",.3s", mosaic_ct as f64),
-                    format_num!(",.3s", (out_buff.max_lines * index) as f64)
                 );
             }
             if let Some(item) = branches[depth].pop() {
@@ -167,5 +173,3 @@ fn mosaic_gen(out_buff: &mut RollingBufWriter, mut mosaic: Mosaic) -> Result<()>
     println!("Done - {mosaic_ct} mosaics generated");
     Ok(())
 }
-
-

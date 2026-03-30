@@ -42,6 +42,7 @@ pub struct Mosaic {
     variant: MosaicVariant,
     size: usize, // grid square size
     len: usize,  // number of tiles
+    desc_str: String,
 }
 impl Mosaic {
     pub fn new(size: usize, variant: MosaicVariant) -> Mosaic {
@@ -52,12 +53,15 @@ impl Mosaic {
         };
         assert!(len < (u16::MAX - 1) as usize, "Mosaic size is too big");
 
+        let desc_str = format!("{size}-{variant}");
+
         let mut mos = Mosaic {
             tiles: vec![11; len],
             edges: vec![ConnEntry::NON_EDGE; len * 4],
             variant,
             size,
             len,
+            desc_str,
         };
         use MosaicVariant as MV;
         match mos.variant {
@@ -89,6 +93,9 @@ impl Mosaic {
             }
         }
         mos
+    }
+    pub fn description_str(&self) -> &str {
+        &self.desc_str
     }
 
     pub fn set_tile(&mut self, index: usize, tile: u8) {
@@ -206,7 +213,7 @@ impl Mosaic {
         }
     }
 
-    pub fn is_trivial(&self) -> bool {
+    pub fn is_trivial(&self, filters: &Filters) -> bool {
         // Removes mosaics that are not important or not what is desired
         use MosaicVariant as MV;
 
@@ -229,11 +236,18 @@ impl Mosaic {
                         cross_ct += 1;
                     }
                 }
-                if cross_ct < 3{
+                if cross_ct < filters.discard_crossings_below {
                     return true;
                 }
                 let ct = has_side.iter().filter(|s| **s).count();
                 ct < cubic_from_name(cubic_type).unwrap().sides.len()
+            }
+            MV::Cylindrical => {
+                if filters.remove_loops {
+                    self.has_trivial_horz_loop()
+                } else {
+                    false
+                }
             }
             _ => todo!("Only implemented for cubic rn"),
         }
