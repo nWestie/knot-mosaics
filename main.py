@@ -119,6 +119,13 @@ def main():
         help="Don't run the watcher that allows clean partial exits. For scripting",
         action="store_true",
     )
+    parse.add_argument(
+        "-w",
+        "--workers",
+        help="Don't run the watcher that allows clean partial exits. For scripting",
+        type=int,
+        default=3,
+    )
     parse.set_defaults(func=run_catalog)
 
     merge = subs.add_parser("merge", help="merge result files with this ID string")
@@ -180,7 +187,7 @@ def run_catalog(args):
     max_queue = 8
     futures: dict[Future, int] = {}
     # spawning workers to parse files
-    with ProcessPoolExecutor(max_workers=6, max_tasks_per_child=8) as executor:
+    with ProcessPoolExecutor(max_workers=args.workers, max_tasks_per_child=3) as executor:
         while not stop_event.is_set():
             # Printing status, consuming old results
             min_ind = min(futures.values() or (0,))
