@@ -40,23 +40,12 @@ def img_dir(type: str, cubic_type: str | None = None) -> Path:
 
 
 @dataclass
-class KnotResult:
-    """Intermediate format for knot results"""
+class IncompleteKnotResult:
+    """Seperating this allows us to compare results without calculating the polynomial"""
 
     size: int
     mosaic_str: str
     tile_ct: int
-    polynomial: str
-
-    def to_str(self) -> str:
-        return f"{self.size}|{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
-
-    @classmethod
-    def from_str(cls, str: str):
-        parts = str.strip().split("|")
-        return KnotResult(
-            int(parts[0]), parts[1].strip(), int(parts[2]), parts[3].strip()
-        )
 
     def better_than(self, other: "KnotResult|None") -> bool:
         """Returns True if self is the preferred result over other"""
@@ -73,6 +62,27 @@ class KnotResult:
         return int(self.mosaic_str, 16) < int(other.mosaic_str, 16)
         # TODO: Implement edge connections metric?
         # fewer edge connections preferred. Would be super annoying with only results
+
+    def to_result(self, polynomial: str) -> "KnotResult":
+        """Adds a polnomial to make a complete knot result"""
+        return KnotResult(self.size, self.mosaic_str, self.tile_ct, polynomial)
+
+
+@dataclass
+class KnotResult(IncompleteKnotResult):
+    """Intermediate format for knot results"""
+
+    polynomial: str
+
+    def to_str(self) -> str:
+        return f"{self.size}|{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
+
+    @classmethod
+    def from_str(cls, str: str):
+        parts = str.strip().split("|")
+        return KnotResult(
+            int(parts[0]), parts[1].strip(), int(parts[2]), parts[3].strip()
+        )
 
 
 def main():
@@ -134,7 +144,7 @@ def main():
 
 def handle_file(args):
     # raise NotImplementedError("Implement for multi-type input")
-    catalog_file(args.input_file, args.output_file, M.parser_types[args.type])
+    catalog_files([args.input_file], args.output_file, M.parser_types[args.type])
 
 
 def run_catalog(args):
@@ -147,6 +157,9 @@ def run_catalog(args):
 
     if not inp_dir.is_dir() or len(list(inp_dir.iterdir())) == 0:
         print(f"ERR: no mosaics to process for {inp_dir}")
+        return
+    if not (inp_dir / "COMPLETED").is_file():
+        print("STOPPING: Mosaic list is not complete")
         return
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
@@ -161,11 +174,13 @@ def run_catalog(args):
         key_thread = threading.Thread(target=wait_for_key, daemon=True)
         key_thread.start()
 
-    i = 0
+    inp_index = 0
+    out_index = 0
+    exit_flag = False
     max_queue = 8
     futures: dict[Future, int] = {}
     # spawning workers to parse files
-    with ProcessPoolExecutor(max_workers=6, max_tasks_per_child=10) as executor:
+    with ProcessPoolExecutor(max_workers=6, max_tasks_per_child=8) as executor:
         while not stop_event.is_set():
             # Printing status, consuming old results
             min_ind = min(futures.values() or (0,))
@@ -182,19 +197,27 @@ def run_catalog(args):
 
             # Queueing new files
             if len(futures) < max_queue:
-                in_path = inp_dir / f"pt{i:04}.txt"
-                out_path = out_dir / f"{size}_pt{i:04}.txt"
-                i += 1
+                in_paths: list[Path] = []
+                for _ in range(3):
+                    if (f := inp_dir / f"pt{inp_index:04}.txt").is_file():
+                        in_paths.append(f)
+                        inp_index += 1
+                    else:
+                        exit_flag = True
+                if exit_flag:
+                    # this breaks out of the while if the inner loop is broken
+                    break
+
+                out_path = out_dir / f"{size}_pt{out_index:04}.txt"
+                out_index += 1
                 # if output is already generated:
                 if out_path.is_file() and not redo:
                     continue
                 # if we're done all the files in the folder, exit
-                if not in_path.is_file():
-                    break
                 if args.verbose:
-                    print(f"Queued {in_path}", flush=True)
-                fut = executor.submit(catalog_file, in_path, out_path, builder)
-                futures[fut] = i - 1
+                    print(f"Queued {",".join(f.stem for f in in_paths)}", flush=True)
+                fut = executor.submit(catalog_files, in_paths, out_path, builder)
+                futures[fut] = out_index - 1
             else:
                 sleep(1)
 
@@ -239,7 +262,7 @@ def combine_results(args):
             print(f"{file} is incomplete")
         for res in results:
             prev_best = all_results.get(res.polynomial)
-            # this is safe because of short-circuit 'or' eval
+            # Only keep the better knot result
             if res.better_than(prev_best):
                 all_results[res.polynomial] = res
 
@@ -292,58 +315,93 @@ def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
     return results, False
 
 
-def catalog_file(
-    in_file: Path, out_file: Path, builder: Callable
+def catalog_files(
+    in_files: list[Path], out_file: Path, builder: Callable
 ) -> tuple[list[KnotResult], int]:
     """Finds all unique knots"""
     # maps polynomial to tile number/mosaic
     knot_bank: dict[str, KnotResult] = {}
 
+    # Dict mapping all seen PD codes to their polynomial.
+    # All knots with the same PD codes are the same knot.
+    all_pd: dict[str, str] = {}
+
     # keep track of how many we've parsed
     line_ct = 0
+
     # iterating over each line in each file in the dir
-    print(f"Starting {in_file} on {current_process().name}", flush=True)
+    print(
+        f"Starting {', '.join(f.stem for f in in_files)} on {current_process().name}",
+        flush=True,
+    )
     start_t = time()
     bad_mosaics: list[str] = []
-    links: list[str] = []
-    with in_file.open("r") as f:
-        for mosaic_str in f:
-            mosaic_str = mosaic_str.strip()
-            line_ct += 1
 
-            mosaic: M.NormMosaic = builder(mosaic_str)
-            knot = M.traverse_mosaic(mosaic, prune_unknots=False)
-            if type(knot) is M.NotAKnot:
-                match knot:
-                    case M.NotAKnot.BAD_CONNECTIONS:
-                        bad_mosaics.append(f"{str(knot)}, {mosaic_str}\n")
-                continue
-            knot = make_knot(knot)  # type:ignore
-            new_knot = knot.simplify()  # type: ignore # probably expensive?
-            if new_knot:
-                knot = new_knot
+    # Iterator over mosaics
+    def iter_lines():
+        for f_name in in_files:
+            with f_name.open("r") as f:
+                for mosaic_str in f:
+                    yield mosaic_str
 
-            polynomial = str(knot.homfly_polynomial())  # type: ignore
-            tile_ct = M.count_tiles(mosaic_str)
+    for mosaic_str in iter_lines():
+        line_ct += 1
 
-            prev_best = knot_bank.get(polynomial)
-            # this is safe because of short-circuit 'or' eval
-            result: KnotResult = KnotResult(
-                mosaic.nominal_size, mosaic_str, tile_ct, polynomial
-            )
-            if result.better_than(prev_best):
-                knot_bank[polynomial] = result
+        # Build mosaic from string
+        mosaic_str = mosaic_str.strip()
+        mosaic: M.NormMosaic = builder(mosaic_str)
+        pd_codes = M.traverse_mosaic(mosaic, prune_unknots=False)
+
+        # discard non-knot mosaics
+        if type(pd_codes) is M.NotAKnot:
+            match pd_codes:
+                case M.NotAKnot.BAD_CONNECTIONS:
+                    bad_mosaics.append(f"{str(pd_codes)}, {mosaic_str}\n")
+            continue
+
+        # Build knot result
+        tile_ct = count_tiles(mosaic_str)
+        new_res = IncompleteKnotResult(mosaic.nominal_size, mosaic_str, tile_ct)
+
+        # If this PD code has been seen before, we already know the polynomial
+        if (existing_poly := all_pd.get(str(pd_codes))) is not None:
+            # If this knot is better than the best existing knot
+            # for this polynomial, replace it.
+            if new_res.better_than(knot_bank[existing_poly]):
+                knot_bank[existing_poly] = new_res.to_result(existing_poly)
+            continue
+
+        # Parse knot using sage
+        knot = make_knot(pd_codes)  # type: ignore
+        new_knot = knot.simplify()
+        if new_knot:
+            knot = new_knot
+
+        new_res = new_res.to_result(str(knot.homfly_polynomial()))
+        all_pd[str(pd_codes)] = new_res.polynomial
+
+        # TODO: Update this portion to handle polynomial
+        # Same knot -> always same polynomial
+        # Different knot -> *usually* different polynomial
+        # This means there are SOME polynomial collisions
+        prev_best = knot_bank.get(new_res.polynomial)
+        if new_res.better_than(prev_best):
+            knot_bank[new_res.polynomial] = new_res
+
     d_time = time() - start_t
 
     if len(bad_mosaics):
-        print(f"Bad Mosaics in {in_file}", flush=True)
+        print(f"WARN: Bad Mosaics in {', '.join(f.stem for f in in_files)}", flush=True)
+
+    # write results to file
     with out_file.open("w") as out:
         lines = [(r.to_str() + "\n") for r in knot_bank.values()]
         out.writelines(lines)
-        out.write("END_RESULT")
+        out.write("END_RESULT")  # confirms that result was not interrupted
 
+    # print result to console
     print(
-        f"Parsed {line_ct:,} from {in_file} in {d_time:.0f}s"
+        f"Parsed {line_ct:,} from {', '.join(f.stem for f in in_files)} in {d_time:.0f}s"
         + f" ({line_ct/d_time:.0f} lines/s)",
         flush=True,
     )

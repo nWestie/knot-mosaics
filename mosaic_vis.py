@@ -10,10 +10,10 @@ from mosaic_util import *
 
 
 def main_browser():
-    # file = Path(askopenfilename(initialdir="./data"))
-    # if not file:
-    #     exit()
-    file = Path("./data/2_cubic/3_bent/pt0000.txt")
+    file = Path(askopenfilename(initialdir="./data"))
+    if not file:
+        exit()
+    # file = Path("./data/2_cubic/3_bent/pt0000.txt")
     ImageBrowser.from_mosaic_file(file, parser_types["cubic"] ).mainloop()
     # ImageBrowser.from_strings(["0021127a98883434"], parser_types["cubic"]).mainloop()
 
