@@ -204,9 +204,6 @@ def run_catalog(args):
                         inp_index += 1
                     else:
                         exit_flag = True
-                if exit_flag:
-                    # this breaks out of the while if the inner loop is broken
-                    break
 
                 out_path = out_dir / f"{size}_pt{out_index:04}.txt"
                 out_index += 1
@@ -218,6 +215,10 @@ def run_catalog(args):
                     print(f"Queued {",".join(f.stem for f in in_paths)}", flush=True)
                 fut = executor.submit(catalog_files, in_paths, out_path, builder)
                 futures[fut] = out_index - 1
+
+                # stops loop when out of inputs
+                if exit_flag:
+                    break
             else:
                 sleep(1)
 
