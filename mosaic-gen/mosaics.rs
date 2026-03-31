@@ -243,14 +243,24 @@ impl Mosaic {
                 ct < cubic_from_name(cubic_type).unwrap().sides.len()
             }
             MV::Cylindrical => {
+                if self.cross_count() < filters.discard_crossings_below {
+                    return true;
+                }
                 if filters.remove_loops {
                     self.has_trivial_horz_loop()
                 } else {
                     false
                 }
             }
+            MV::Flat => self.cross_count() < filters.discard_crossings_below,
             _ => todo!("Only implemented for cubic rn"),
         }
+    }
+    fn cross_count(&self) -> usize {
+        self.tiles
+            .iter()
+            .filter(|t| [9, 10, 11].contains(t))
+            .count()
     }
     /// returns true for any mosaics with a row that is a simple loop.
     #[allow(unused)]
