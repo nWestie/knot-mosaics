@@ -1,7 +1,6 @@
 #! /usr/bin/env python
 import argparse
 from concurrent.futures import Future, ProcessPoolExecutor
-from dataclasses import dataclass
 from multiprocessing import current_process
 from pathlib import Path
 import threading
@@ -9,80 +8,7 @@ from time import sleep, time
 from typing import Callable
 import mosaics as M
 import mosaic_vis as mvis
-from mosaic_util import *
-from sage_funcs import make_knot
-
-output_dir = Path(f"output/")
-
-
-def mosaic_dir(type: str, size: int, cubic_type: str | None = None) -> Path:
-    # get the input folder of mosaics
-    path = Path(f"data/{size}_{type}")
-    if cubic_type and type == "cubic":
-        path /= cubic_type
-    return path
-
-
-def results_dir(type: str, cubic_type: str | None = None) -> Path:
-    # get the output folder of intermediate results
-    path = Path(f"data/{type}_res")
-    if cubic_type and type == "cubic":
-        path /= cubic_type
-    return path
-
-
-def img_dir(type: str, cubic_type: str | None = None) -> Path:
-    # get the output folder for images
-    path = output_dir / f"{type}_imgs"
-    if cubic_type and type == "cubic":
-        path /= cubic_type
-    return path
-
-
-@dataclass
-class IncompleteKnotResult:
-    """Seperating this allows us to compare results without calculating the polynomial"""
-
-    size: int
-    mosaic_str: str
-    tile_ct: int
-
-    def better_than(self, other: "KnotResult|None") -> bool:
-        """Returns True if self is the preferred result over other"""
-        # Some result preferred to none
-        if other is None:
-            return True
-        # Smaller mosaic is preferred
-        if self.size != other.size:
-            return self.size < other.size
-        # lower tile number is preferred
-        if self.tile_ct != other.tile_ct:
-            return self.tile_ct < other.tile_ct
-        # lower indexes preffered
-        return int(self.mosaic_str, 16) < int(other.mosaic_str, 16)
-        # TODO: Implement edge connections metric?
-        # fewer edge connections preferred. Would be super annoying with only results
-
-    def to_result(self, polynomial: str) -> "KnotResult":
-        """Adds a polnomial to make a complete knot result"""
-        return KnotResult(self.size, self.mosaic_str, self.tile_ct, polynomial)
-
-
-@dataclass
-class KnotResult(IncompleteKnotResult):
-    """Intermediate format for knot results"""
-
-    polynomial: str
-
-    def to_str(self) -> str:
-        return f"{self.size}|{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
-
-    @classmethod
-    def from_str(cls, str: str):
-        parts = str.strip().split("|")
-        return KnotResult(
-            int(parts[0]), parts[1].strip(), int(parts[2]), parts[3].strip()
-        )
+import mosaic_util as util
 
 
 def main():
@@ -158,8 +84,8 @@ def run_catalog(args):
     """Uses multiple processes to parse through a directory of mosaic files"""
     [type, size, redo] = [args.type, args.size, not args.keep_existing]
     builder: Callable[[str], M.NormMosaic] = M.parser_types[type]
-    inp_dir = mosaic_dir(type, size, args.cubic_version)
-    out_dir = results_dir(type, args.cubic_version)
+    inp_dir = util.mosaic_dir(type, size, args.cubic_version)
+    out_dir = util.results_dir(type, args.cubic_version)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not inp_dir.is_dir() or len(list(inp_dir.iterdir())) == 0:
@@ -181,13 +107,16 @@ def run_catalog(args):
         key_thread = threading.Thread(target=wait_for_key, daemon=True)
         key_thread.start()
 
+    print(f"Parsing from {inp_dir}", flush=True)
     inp_index = 0
     out_index = 0
     exit_flag = False
     max_queue = 8
     futures: dict[Future, int] = {}
     # spawning workers to parse files
-    with ProcessPoolExecutor(max_workers=args.workers, max_tasks_per_child=3) as executor:
+    with ProcessPoolExecutor(
+        max_workers=args.workers, max_tasks_per_child=3
+    ) as executor:
         while not stop_event.is_set():
             # Printing status, consuming old results
             min_ind = min(futures.values() or (0,))
@@ -234,33 +163,35 @@ def run_catalog(args):
             print(f"Working on: {i}, running={fut.running()}")
             for fut, i in futures.items()
         ]
-        executor.shutdown(wait=True, cancel_futures=True)
+        executor.shutdown(wait=True, cancel_futures=False)
         print("fully shutdown now")
 
 
 def combine_results(args):
     """Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
 
+    from sage_funcs import make_knot
+
     mosaic_type = args.type
     builder = M.parser_types[args.type]
 
-    results_folder = results_dir(mosaic_type, args.cubic_version)
+    results_folder = util.results_dir(mosaic_type, args.cubic_version)
     if not results_folder.is_dir() or len(list(results_folder.iterdir())) == 0:
         print(f"ERR: no results to merge for {results_folder}")
         return
 
-    imgs = img_dir(mosaic_type, args.cubic_version)
+    imgs = util.img_dir(mosaic_type, args.cubic_version)
     if imgs.exists():
         [f.unlink() for f in imgs.iterdir()]
     else:
         imgs.mkdir(parents=True)
 
     out_file = (
-        output_dir
+        util.output_dir
         / f"{mosaic_type}_{args.cubic_version+"_" if mosaic_type == "cubic" else ""}results.txt"
     )
     # maps polynomial to knot result
-    all_results: dict[str, KnotResult] = {}
+    all_results: dict[str, util.KnotResult] = {}
 
     # merge results, keeping lowest tile number
 
@@ -277,7 +208,7 @@ def combine_results(args):
     # generate images
     print("writing file and images...")
     # tuples of (knotID, polynomial)
-    knot_ids: list[tuple[str, KnotResult]] = []
+    knot_ids: list[tuple[str, util.KnotResult]] = []
     for polynomial, res in all_results.items():
         # yes, I'm re-running the ID/simplify steps.
         # But the alternative is to run knotID on all the result files...
@@ -295,7 +226,7 @@ def combine_results(args):
         # cleaning up the KnotInfo output
         for s in ["KnotInfo", "[", "]", "'"]:
             knotid = knotid.replace(s, "")
-        img_path = imgs / (f"{res.size}-{knotid}-{res.mosaic_str}.png")
+        img_path = util.img_filepath(imgs, res, knotid)
         mvis.gen_png(mosaic, res.mosaic_str, knotid, img_path)
         print(f"saved: {img_path}")
 
@@ -309,9 +240,10 @@ def combine_results(args):
             out.write(f"{id.ljust(padding)}|{res.to_str()}\n")
 
 
-def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
+
+def load_result_file(file: Path) -> tuple[list[util.KnotResult], bool]:
     """Extracts knot results from file. Returns true if file contains the correct end-indicator"""
-    results: list[KnotResult] = []
+    results: list[util.KnotResult] = []
     with file.open("r") as inp:
         for line in inp:
             # If this line is not present, indicates an interruption during writing.
@@ -319,16 +251,19 @@ def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
             if line == "END_RESULT":
                 return results, True
             if line:
-                results.append(KnotResult.from_str(line))
+                results.append(util.KnotResult.from_str(line))
     return results, False
 
 
 def catalog_files(
     in_files: list[Path], out_file: Path, builder: Callable
-) -> tuple[list[KnotResult], int]:
+) -> tuple[list[util.KnotResult], int]:
     """Finds all unique knots"""
+
+    from sage_funcs import make_knot
+
     # maps polynomial to tile number/mosaic
-    knot_bank: dict[str, KnotResult] = {}
+    knot_bank: dict[str, util.KnotResult] = {}
 
     # Dict mapping all seen PD codes to their polynomial.
     # All knots with the same PD codes are the same knot.
@@ -368,8 +303,8 @@ def catalog_files(
             continue
 
         # Build knot result
-        tile_ct = count_tiles(mosaic_str)
-        new_res = IncompleteKnotResult(mosaic.nominal_size, mosaic_str, tile_ct)
+        tile_ct = util.count_tiles(mosaic_str)
+        new_res = util.IncompleteKnotResult(mosaic.nominal_size, mosaic_str, tile_ct)
 
         # If this PD code has been seen before, we already know the polynomial
         if (existing_poly := all_pd.get(str(pd_codes))) is not None:

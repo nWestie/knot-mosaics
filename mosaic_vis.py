@@ -4,22 +4,22 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 from tkinter.filedialog import askopenfilename
-from matplotlib import pyplot as plt
 from mosaics import NormMosaic, parser_types
 from mosaic_util import *
 
 
 def main_browser():
-    file = Path(askopenfilename(initialdir="./data"))
-    if not file:
-        exit()
+
     # file = Path("./data/2_cubic/3_bent/pt0000.txt")
-    ImageBrowser.from_mosaic_file(file, parser_types["cubic"] ).mainloop()
+    ImageBrowser.from_mosaic_file(None, parser_types["flat"]).mainloop()
     # ImageBrowser.from_strings(["0021127a98883434"], parser_types["cubic"]).mainloop()
 
 
-def gen_png(mosaic: NormMosaic,mosaic_str:str, id: str, img_path: Path):
+def gen_png(mosaic: NormMosaic, mosaic_str: str, id: str, img_path: Path):
     """Builds a PNG with metadata shown above/below mosaic"""
+
+    from matplotlib import pyplot as plt
+
     img = build_img(mosaic)
     dpi: int = 300
 
@@ -48,6 +48,7 @@ def gen_png(mosaic: NormMosaic,mosaic_str:str, id: str, img_path: Path):
     plt.savefig(img_path, bbox_inches="tight")
     plt.close(fig)
 
+
 def build_img(mosaic: NormMosaic) -> Image.Image:
     """Builds a PIL image from a set of mosaic tiles"""
     if not hasattr(build_img, "tiles"):
@@ -56,7 +57,9 @@ def build_img(mosaic: NormMosaic) -> Image.Image:
     tiles = build_img.tiles
     tile_size = tiles[0].width
 
-    out_img = Image.new("RGB", (tile_size * mosaic.width, tile_size * mosaic.height), "white")
+    out_img = Image.new(
+        "RGB", (tile_size * mosaic.width, tile_size * mosaic.height), "white"
+    )
 
     for i, tile in enumerate(mosaic.tiles):
         x, y = index_to_xy(i, mosaic.width)
@@ -64,7 +67,10 @@ def build_img(mosaic: NormMosaic) -> Image.Image:
 
     return out_img
 
+
 def show_img(img: Image.Image):
+    from matplotlib import pyplot as plt
+
     ax = plt.axes()
     ax.imshow(img)
     ax.axis("off")
@@ -180,7 +186,12 @@ class ImageBrowser(tk.Tk):
         return ImageBrowser(mosaics, getter)
 
     @classmethod
-    def from_mosaic_file(cls, file: Path, parser):
+    def from_mosaic_file(cls, file: Path | None, parser):
+        if not file:
+            file = Path(askopenfilename(initialdir="./data"))
+            if not file:
+                exit()
+
         with open(file) as f:
             mosaics = [l.strip() for l in f.readlines()]
 
