@@ -11,4 +11,5 @@ target/
 data/
 testing/
 output/
+cubic_site/
 *.sh
