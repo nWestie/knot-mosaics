@@ -80,7 +80,7 @@ impl Mosaic {
             MV::Cubic { .. } => {
                 link_cubic_sides(&mut mos);
             }
-            _ => todo!("Other types not implemented"),
+            MV::Mobius => todo!("Mobius type not implemented"),
         };
         if let MosaicVariant::Cubic { cubic_type } = &mos.variant {
             let non_zero_sides = cubic_from_name(cubic_type).unwrap().sides;
@@ -253,7 +253,17 @@ impl Mosaic {
                 }
             }
             MV::Flat => self.cross_count() < filters.discard_crossings_below,
-            _ => todo!("Only implemented for cubic rn"),
+            MV::Toric => {
+                if self.cross_count() < filters.discard_crossings_below {
+                    return true;
+                }
+                if filters.remove_loops {
+                    self.has_trivial_horz_loop() || self.has_trivial_vert_loop()
+                } else {
+                    false
+                }
+            }
+            _ => todo!("Not Implemented for this type"),
         }
     }
     fn cross_count(&self) -> usize {
@@ -266,7 +276,7 @@ impl Mosaic {
     #[allow(unused)]
     fn has_trivial_horz_loop(&self) -> bool {
         if matches!(self.variant, MosaicVariant::Cubic { .. }) {
-            todo!("Not Implemented for  cubic");
+            todo!("Not Implemented for cubic");
         }
         let sz = self.size;
         'row_loop: for row in 0..sz {
@@ -283,7 +293,21 @@ impl Mosaic {
     }
     #[allow(unused)]
     fn has_trivial_vert_loop(&self) -> bool {
-        todo!("Check for trivial loops")
+        if matches!(self.variant, MosaicVariant::Cubic { .. }) {
+            todo!("Not Implemented for cubic");
+        }
+        let sz = self.size;
+        'col_loop: for col in 0..sz {
+            for row in 0..sz {
+                let item = self.get_tile_xy(col, row);
+                if !matches!(item, 6 | 9 | 10) {
+                    // contine to next column if any item in this col doesn't have a vertical connection
+                    continue 'col_loop;
+                }
+            }
+            return true;
+        }
+        false
     }
     fn cubic_get_side_num(&self, index: usize) -> usize {
         let (x, y) = self.index_to_xy(index);

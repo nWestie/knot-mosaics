@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
@@ -33,9 +33,32 @@ impl RollingBufWriter {
             writer,
         })
     }
+    pub fn resume_from<P: AsRef<Path>>(
+        base_path: &P,
+        max_lines: usize,
+        line_len: usize,
+        start_file_ind: usize,
+    ) -> io::Result<Self> {
+        let base_path = base_path.as_ref().to_path_buf();
+        let buf_size = line_len * 2000;
+        let writer = Self::open_file(&base_path, start_file_ind, buf_size)?;
+
+        Ok(Self {
+            output_dir: base_path,
+            max_lines,
+            current_lines: 0,
+            file_index: start_file_ind,
+            buf_size,
+            writer,
+        })
+    }
+    
+    pub fn path_from_index(base_path: &Path, index: usize)->PathBuf{
+        base_path.join(format!("pt{index:04}.txt"))
+    }
 
     fn open_file(base_path: &Path, index: usize, buf_size: usize) -> io::Result<BufWriter<File>> {
-        let path = base_path.join(format!("pt{index:04}.txt"));
+        let path = Self::path_from_index(base_path, index);
         let file = File::create(path)?;
         Ok(BufWriter::with_capacity(buf_size, file))
     }
