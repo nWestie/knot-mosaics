@@ -48,9 +48,15 @@ def main():
     parse.add_argument(
         "-w",
         "--workers",
-        help="Don't run the watcher that allows clean partial exits. For scripting",
+        help="Number of parallel worker-processes to spawn",
         type=int,
-        default=3,
+        default=6,
+    )
+    parse.add_argument(
+        "-i",
+        "--ignore-incomplete",
+        help="Allow parsing of incomplete result folders",
+        action="store_true"
     )
     parse.set_defaults(func=run_catalog)
 
@@ -91,8 +97,9 @@ def run_catalog(args):
     if not inp_dir.is_dir() or len(list(inp_dir.iterdir())) == 0:
         print(f"ERR: no mosaics to process for {inp_dir}")
         return
-    if not (inp_dir / "COMPLETED").is_file():
+    if (not (inp_dir / "COMPLETED").is_file()) and (not args.ignore_incomplete):
         print("STOPPING: Mosaic list is not complete")
+        print("run with --ignore-incompete to proceed anyway")
         return
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
@@ -134,6 +141,7 @@ def run_catalog(args):
             # Queueing new files
             if len(futures) < max_queue:
                 in_paths: list[Path] = []
+                # taking 3 files as input for each
                 for _ in range(3):
                     if (f := inp_dir / f"pt{inp_index:04}.txt").is_file():
                         in_paths.append(f)
@@ -186,10 +194,8 @@ def combine_results(args):
     else:
         imgs.mkdir(parents=True)
 
-    out_file = (
-        util.output_dir
-        / f"{mosaic_type}_{args.cubic_version+"_" if mosaic_type == "cubic" else ""}results.txt"
-    )
+    out_file = util.output_path(mosaic_type, args.cubic_version)
+
     # maps polynomial to knot result
     all_results: dict[str, util.KnotResult] = {}
 
@@ -238,7 +244,6 @@ def combine_results(args):
     with out_file.open("w") as out:
         for id, res in knot_ids:
             out.write(f"{id.ljust(padding)}|{res.to_str()}\n")
-
 
 
 def load_result_file(file: Path) -> tuple[list[util.KnotResult], bool]:

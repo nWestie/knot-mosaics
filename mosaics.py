@@ -256,6 +256,7 @@ def traverse_mosaic(  # type: ignore
             return res  # type: ignore
         pos = res
         if pos.as_tup == start_pos:
+            # We should eventually return to the starting position
             break
 
     # if we get less moves than expected, must be a link
@@ -265,12 +266,14 @@ def traverse_mosaic(  # type: ignore
     if len(under_crosses) < 3 and prune_unknots:
         return NotAKnot.UNKNOT
     # calculating the PD codes from the crossing data
+    # see https://katlas.org/wiki/Planar_Diagrams
     max_edge = 2 * len(under_crosses)
     pd_codes: list[list[int]] = []
+    # u_cross is the incoming tile side, u_edge is the edge index
     for u_cross, u_edge in under_crosses:
         # get overcrossing corresponding to this intersection
         o_cross, o_edge = over_crosses[u_cross.as_pos_tup]
-        # check which way
+        # check if the over crossing starts from left or right
         if o_cross.side == (u_cross.side + 1) % 4:
             pd_code = (u_edge, o_edge, u_edge + 1, o_edge + 1)
         else:

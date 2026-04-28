@@ -34,7 +34,7 @@ def mosaic_dir(type: str, size: int, cubic_type: str | None = None) -> Path:
 
 
 def results_dir(type: str, cubic_type: str | None = None) -> Path:
-    # get the output folder of intermediate results
+    """Get the output folder of intermediate results"""
     path = Path(f"data/{type}_res")
     if cubic_type and type == "cubic":
         path /= cubic_type
@@ -44,8 +44,13 @@ def results_dir(type: str, cubic_type: str | None = None) -> Path:
 output_dir = Path(f"output/")
 
 
+def output_path(type: str, cubic_type: str | None = None) -> Path:
+    cub_str = cubic_type + "_" if (cubic_type is not None and type == "cubic") else ""
+    return output_dir / f"{type}_{cub_str}results.txt"
+
+
 def img_dir(type: str, cubic_type: str | None = None) -> Path:
-    # get the output folder for images
+    """Get the output folder for images"""
     path = output_dir / f"{type}_imgs"
     if cubic_type and type == "cubic":
         path /= cubic_type
@@ -53,6 +58,7 @@ def img_dir(type: str, cubic_type: str | None = None) -> Path:
 
 
 def img_filepath(dir: Path, res: "KnotResult", knotid: str):
+    """Path where an image for a specific result should be stored"""
     img_path = dir / (f"{res.size}-{knotid}-{res.mosaic_str}.png")
     return img_path
 
