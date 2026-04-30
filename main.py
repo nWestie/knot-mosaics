@@ -99,7 +99,7 @@ def run_catalog(args):
         return
     if (not (inp_dir / "COMPLETED").is_file()) and (not args.ignore_incomplete):
         print("STOPPING: Mosaic list is not complete")
-        print("run with --ignore-incompete to proceed anyway")
+        print("run with --ignore-incomplete to proceed anyway")
         return
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
