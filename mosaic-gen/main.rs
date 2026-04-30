@@ -74,7 +74,7 @@ struct CliArgs {
     #[arg(short, long, default_value_os_t =PathBuf::from("../data/"))]
     base_dir: PathBuf,
     /// Resume generation of partially complete results
-    #[arg(short, long)]
+    #[arg(long)]
     resume: bool,
 
     #[command[flatten]]
@@ -82,111 +82,45 @@ struct CliArgs {
 }
 
 fn main() -> Result<()> {
-    let args = CliArgs {
-        mosaic_size: 4,
-        mosaic_type: MosaicVariant::Cubic {
-            cubic_type: String::from("2"),
-        },
-        max_lines: 100_000,
-        base_dir: PathBuf::from("../data"),
-        filters: Filters {
-            discard_crossings_below: 3,
-            remove_loops: true,
-        },
-        resume: true,
-    };
-    // let args = CliArgs::parse();
+    // let args = CliArgs {
+    //     mosaic_size: 3,
+    //     mosaic_type: MosaicVariant::Cubic {
+    //         cubic_type: String::from("4_t"),
+    //     },
+    //     max_lines: 100_000,
+    //     base_dir: PathBuf::from("../data"),
+    //     filters: Filters {
+    //         discard_crossings_below: 4,
+    //         remove_loops: true,
+    //     },
+    //     resume: true,
+    // };
+    let args = CliArgs::parse();
     dbg!(&args);
     let size: usize = args.mosaic_size;
     let folder_name = format!("{size}_{}", args.mosaic_type.dir_code());
     let output_folder = args.base_dir.join(folder_name);
 
-    let t_start = Instant::now(); //Timing 
     println!("generating ...");
 
     create_dir_all(&output_folder)?;
     let mosaic = Mosaic::new(size, args.mosaic_type);
     let generator = if args.resume {
-        resume_mosaic_gen(mosaic, &output_folder, args.max_lines)?
+        let g = Generator::resume_mosaic_gen(mosaic, &output_folder, args.max_lines)?;
+        println!(
+            "Resuming: {} complete",
+            format_num!(".2%", g.calc_progress())
+        );
+        g
     } else {
         let outbuf = RollingBufWriter::new(&output_folder, args.max_lines, mosaic.get_len())?;
         Generator::new(outbuf, mosaic)
     };
-    mosaic_gen(generator, args.filters)?;
+    generate(generator, args.filters)?;
 
     let path = output_folder.join("COMPLETED");
     std::fs::File::create(path)?;
-    println!("- Completed in {:.6} s)", t_start.elapsed().as_secs_f64(),);
     Ok(())
-}
-
-/// `mosaic` should be an empty mosaic of the correct type.
-fn resume_mosaic_gen(
-    mut mosaic: Mosaic,
-    output_folder: &PathBuf,
-    lines_per_file: usize,
-) -> Result<Generator> {
-    let names = std::fs::read_dir(output_folder)?
-        .filter_map(|p| p.ok())
-        .filter_map(|p| p.file_name().into_string().ok());
-    let mut last_ind = 0;
-
-    for n in names {
-        if n == "COMPLETED" {
-            return Err(Error::other("Generation Already Complete!"));
-        }
-        let Some(num) = n
-            .strip_prefix("pt")
-            .and_then(|s| s.strip_suffix(".txt"))
-            .and_then(|s| s.parse::<usize>().ok())
-        else {
-            continue;
-        };
-        last_ind = std::cmp::max(num, last_ind);
-    }
-    let mut mos_str = String::new();
-    let file = File::open(RollingBufWriter::path_from_index(output_folder, last_ind))?;
-    BufReader::new(file).read_line(&mut mos_str)?;
-    let mos_str = mos_str.trim();
-    if !mos_str.is_ascii() {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "Mosaic string is not ASCII",
-        ));
-    }
-    let mut branches: Vec<Vec<u8>> = vec![vec![]; mosaic.get_len()];
-    // build mosaic from string
-    for (i, ch) in mos_str.chars().enumerate() {
-        let possible_vals = mosaic.get_valid_tiles(i);
-
-        let num = ch
-            .to_digit(16)
-            .map(|n| n as u8)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Mosaic has non-neumeric chars"))?;
-        // Check that this tile is valid in this position
-        if num != 12 {
-            let Some(index) = possible_vals.iter().position(|val| *val == num) else {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("tile {num} at index {i} forms invalid mosaic"),
-                ));
-            };
-            branches[i] = possible_vals[index + 1..].to_vec();
-            branches[i].reverse();
-            mosaic.set_tile(i, num);
-        }
-    }
-
-    let mut out_buff =
-        RollingBufWriter::resume_from(&output_folder, lines_per_file, mosaic.get_len(), last_ind)?;
-    out_buff.write_line(&mosaic.to_string())?;
-    out_buff.flush()?;
-    Ok(Generator {
-        branches,
-        depth: mosaic.get_len() - 1,
-        mosaic,
-        out_buff,
-    })
 }
 
 struct Generator {
@@ -194,10 +128,14 @@ struct Generator {
     depth: usize,
     mosaic: Mosaic,
     out_buff: RollingBufWriter,
+    progress: Vec<(usize, usize)>, // (i,n) for each level, stores current index and total count of options
+    start_ct: u64,
+    gen_ct: u64,
 }
 impl Generator {
     fn new(out_buff: RollingBufWriter, mosaic: Mosaic) -> Generator {
-        let mut branches: Vec<Vec<u8>> = vec![vec![]; mosaic.get_len()];
+        let len = mosaic.get_len();
+        let mut branches: Vec<Vec<u8>> = vec![vec![]; len];
 
         branches[0] = Vec::from(mosaic.get_valid_tiles(0));
         branches[0].reverse(); // this preserves increasing numeric order of the output
@@ -206,16 +144,115 @@ impl Generator {
             depth: 0,
             mosaic,
             out_buff,
+            progress: vec![(0, 1); len],
+            start_ct: 0,
+            gen_ct: 0,
         }
+    }
+    /// `mosaic` should be an empty mosaic of the correct type.
+    fn resume_mosaic_gen(
+        mut mosaic: Mosaic,
+        output_folder: &PathBuf,
+        lines_per_file: usize,
+    ) -> Result<Generator> {
+        // getting all existing files
+        let names = std::fs::read_dir(output_folder)?
+            .filter_map(|p| p.ok())
+            .filter_map(|p| p.file_name().into_string().ok());
+        let mut last_ind = 0;
+
+        // find the index of the last generated file
+        for n in names {
+            if n == "COMPLETED" {
+                return Err(Error::other("Generation Already Complete!"));
+            }
+            let Some(num) = n
+                .strip_prefix("pt")
+                .and_then(|s| s.strip_suffix(".txt"))
+                .and_then(|s| s.parse::<usize>().ok())
+            else {
+                continue;
+            };
+            last_ind = std::cmp::max(num, last_ind);
+        }
+
+        // get the mosaic string that starts that file
+        let mut mos_str = String::new();
+        let file = File::open(RollingBufWriter::path_from_index(output_folder, last_ind))?;
+        BufReader::new(file).read_line(&mut mos_str)?;
+        let mos_str = mos_str.trim();
+        if !mos_str.is_ascii() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Mosaic string is not ASCII",
+            ));
+        }
+
+        // rebuild mosaic generation object from string
+        let mut branches: Vec<Vec<u8>> = vec![vec![]; mosaic.get_len()];
+        let mut progress: Vec<(usize, usize)> = vec![(0, 1); mosaic.get_len()];
+
+        for (i, ch) in mos_str.chars().enumerate() {
+            let possible_vals = mosaic.get_valid_tiles(i);
+
+            let num = ch.to_digit(16).map(|n| n as u8).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidData, "Mosaic has non-neumeric chars")
+            })?;
+            // Check that this tile is valid in this position
+            if num != 12 {
+                let Some(index) = possible_vals.iter().position(|val| *val == num) else {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        format!("tile {num} at index {i} forms invalid mosaic"),
+                    ));
+                };
+                // saving progress: "at this level I am on branch i of n"
+                progress[i] = (index, possible_vals.len());
+                branches[i] = possible_vals[index + 1..].to_vec();
+                branches[i].reverse();
+                mosaic.set_tile(i, num);
+            }
+        }
+
+        let mut out_buff = RollingBufWriter::resume_from(
+            &output_folder,
+            lines_per_file,
+            mosaic.get_len(),
+            last_ind,
+        )?;
+        out_buff.write_line(&mosaic.to_string())?;
+        out_buff.flush()?;
+        Ok(Generator {
+            branches,
+            depth: mosaic.get_len() - 1,
+            mosaic,
+            out_buff,
+            progress,
+            start_ct: (last_ind * 100_000) as u64,
+            gen_ct: 0,
+        })
+    }
+    fn calc_progress(&self) -> f64 {
+        let mut denom: f64 = 1.;
+        let mut sum: f64 = 0.;
+        // the first 15 levels are probably a good enough guess
+        for (i, n) in self.progress.iter().take(15) {
+            denom *= *n as f64;
+            sum += (*i as f64) / denom;
+        }
+        sum
     }
 }
 
-fn mosaic_gen(mut g: Generator, filters: Filters) -> Result<()> {
-    let mut mosaic_ct: usize = 0;
+fn generate(mut g: Generator, filters: Filters) -> Result<()> {
+    // let mut mosaic_ct: usize = 0;
+    let t_start = Instant::now(); //Timing 
+
     'outer: loop {
         // moving to the next branch at <depth>
         if let Some(first) = g.branches[g.depth].pop() {
             g.mosaic.set_tile(g.depth, first);
+            g.progress[g.depth].0 += 1; // stepping over to next 'branch'
             // this does not hit at all for cubic?? Likely because the only metric is
             if g.mosaic.is_trivial(&filters) {
                 continue; // this will go to next branch at same depth
@@ -227,6 +264,7 @@ fn mosaic_gen(mut g: Generator, filters: Filters) -> Result<()> {
                 break; // exit if we explore all top-level branches
             }
             g.mosaic.set_tile(g.depth, 11);
+            g.progress[g.depth] = (0, 1);
             g.depth -= 1;
             continue;
         }
@@ -236,13 +274,16 @@ fn mosaic_gen(mut g: Generator, filters: Filters) -> Result<()> {
             g.branches[g.depth].reverse();
             if let Some(item) = g.branches[g.depth].pop() {
                 g.mosaic.set_tile(g.depth, item);
+                g.progress[g.depth] = (0, g.branches[g.depth].len() + 1);
                 if g.mosaic.is_trivial(&filters) {
                     // this moves to the next branch at this depth.
                     continue 'outer;
                 }
                 g.depth += 1
             } else {
+                // there are no valid tiles for this position, back out
                 g.mosaic.set_tile(g.depth, 11);
+                g.progress[g.depth] = (0, 1);
                 g.depth -= 1;
                 continue 'outer;
             }
@@ -251,12 +292,23 @@ fn mosaic_gen(mut g: Generator, filters: Filters) -> Result<()> {
         g.depth -= 1;
         loop {
             let res = g.out_buff.write_line(&g.mosaic.to_string())?;
-            mosaic_ct += 1;
+            g.gen_ct += 1;
             if let RollOver::Rolled(index) = res {
+                let tot_gen =  (g.gen_ct + g.start_ct) as f64;
+                let progress = g.calc_progress();
+                let est_total = tot_gen/ progress;
+                let est_remain = est_total - tot_gen;
+                let elapsed = t_start.elapsed().as_secs_f64();
+                let rate = (g.gen_ct as f64)/elapsed;
+                let est_dur = (est_remain / rate) as u64;
                 println!(
-                    "{}: on pt{index} - {} generated",
+                    "{}: on pt{index} - {} generated, {}\n - Est {}:{}:{} remaining",
                     g.mosaic.description_str(),
-                    format_num!(",.3s", mosaic_ct as f64),
+                    format_num!(",.3s", g.gen_ct as f64),
+                    format_num!(".2%", progress),
+                    est_dur / 3600,
+                    (est_dur % 3600) / 60,
+                    est_dur % 60,
                 );
             }
             if let Some(item) = g.branches[g.depth].pop() {
@@ -265,11 +317,14 @@ fn mosaic_gen(mut g: Generator, filters: Filters) -> Result<()> {
                 break;
             }
         }
+        // clean up specifically the last tile
         g.mosaic.set_tile(g.depth, 11);
+        g.progress[g.depth] = (0, 1);
         // the weird max here is to handle the case of a 1x1 mosaic
         g.depth = std::cmp::max(1, g.depth) - 1;
     }
     g.out_buff.flush()?;
-    println!("Done - {mosaic_ct} mosaics generated");
+    println!("Done - {} mosaics generated", g.gen_ct);
+    println!("- Completed in {:.6} s)", t_start.elapsed().as_secs_f64(),);
     Ok(())
 }
