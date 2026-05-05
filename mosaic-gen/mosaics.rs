@@ -219,7 +219,13 @@ impl Mosaic {
     pub fn is_trivial(&self, filters: &Filters) -> bool {
         // Removes mosaics that are not important or not what is desired
         use MosaicVariant as MV;
-
+        let count_crossings = || {
+            self.tiles
+                .iter()
+                // unknown tile is counted so this can be used as a filter
+                .filter(|t| [9, 10, 11].contains(t))
+                .count()
+        };
         match &self.variant {
             MV::Cubic { cubic_type } => {
                 // removes cubic mosaics using less sides than specified
@@ -246,7 +252,7 @@ impl Mosaic {
                 ct < cubic_from_name(cubic_type).unwrap().sides.len()
             }
             MV::Cylindrical => {
-                if self.cross_count() < filters.discard_crossings_below {
+                if count_crossings() < filters.discard_crossings_below {
                     return true;
                 }
                 if filters.remove_loops {
@@ -255,9 +261,9 @@ impl Mosaic {
                     false
                 }
             }
-            MV::Flat => self.cross_count() < filters.discard_crossings_below,
+            MV::Flat => count_crossings() < filters.discard_crossings_below,
             MV::Toric => {
-                if self.cross_count() < filters.discard_crossings_below {
+                if count_crossings() < filters.discard_crossings_below {
                     return true;
                 }
                 if filters.remove_loops {
@@ -267,39 +273,45 @@ impl Mosaic {
                 }
             }
             MV::Mobius => {
-                self.cross_count() < filters.discard_crossings_below
+                let crossings = count_crossings();
+                // count tiles with possible connections on the left side
+                let left_conns:i64 = (0..self.size)
+                    .filter(|i| {
+                        let t = self.get_tile_xy(0, *i);
+                        TILE_CONNECTION_SIDES[t as usize][2] != Conn::No
+                    })
+                    .count().try_into().unwrap();
+                let hidden_crosses = left_conns * (left_conns - 1) / 2;
+                crossings as i64 + hidden_crosses < filters.discard_crossings_below as i64
             }
         }
     }
-    fn cross_count(&self) -> usize {
-        self.tiles
-            .iter()
-            .filter(|t| [9, 10, 11].contains(t))
-            .count()
-    }
+
     /// returns true for any mosaics with a row that is a simple loop.
-    #[allow(unused)]
     fn has_trivial_horz_loop(&self) -> bool {
-        if matches!(self.variant, MosaicVariant::Cubic { .. }) {
-            todo!("Not Implemented for cubic");
-        }
-        let sz = self.size;
-        'row_loop: for row in 0..sz {
-            for col in 0..sz {
-                let item = self.get_tile_xy(col, row);
-                if !matches!(item, 5 | 9 | 10) {
-                    // contine to next row if any item doesn't have a horizontal connection
-                    continue 'row_loop;
+        match self.variant {
+            MosaicVariant::Cubic { .. } => panic!("Horz loop not valid for cubic"),
+            MosaicVariant::Flat => panic!("Horz loop not valid for flat"),
+            _ => {
+                let sz = self.size;
+                'row_loop: for row in 0..sz {
+                    for col in 0..sz {
+                        let item = self.get_tile_xy(col, row);
+                        if !matches!(item, 5 | 9 | 10) {
+                            // contine to next row if any item doesn't have a horizontal connection
+                            continue 'row_loop;
+                        }
+                    }
+                    return true;
                 }
+                false
             }
-            return true;
         }
-        false
     }
-    #[allow(unused)]
+    /// returns true for any (toric) mosaic with trivial
     fn has_trivial_vert_loop(&self) -> bool {
-        if matches!(self.variant, MosaicVariant::Cubic { .. }) {
-            todo!("Not Implemented for cubic");
+        if !matches!(self.variant, MosaicVariant::Toric) {
+            panic!("Vertical loops are only valid in toric mosiacs");
         }
         let sz = self.size;
         'col_loop: for col in 0..sz {
