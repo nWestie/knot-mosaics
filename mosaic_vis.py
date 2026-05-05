@@ -11,7 +11,7 @@ from mosaic_util import *
 def main_browser():
 
     # file = Path("./data/2_cubic/3_bent/pt0000.txt")
-    ImageBrowser.from_mosaic_file(None, parser_types["flat"]).mainloop()
+    ImageBrowser.from_mosaic_file(None, parser_types["mobius"]).mainloop()
     # ImageBrowser.from_strings(["0021127a98883434"], parser_types["cubic"]).mainloop()
 
 

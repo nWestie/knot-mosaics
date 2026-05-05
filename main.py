@@ -340,6 +340,7 @@ def catalog_files(
 
     if len(bad_mosaics):
         print(f"WARN: Bad Mosaics in {', '.join(f.stem for f in in_files)}", flush=True)
+        [print(mos) for mos in bad_mosaics]
 
     # write results to file
     with out_file.open("w") as out:

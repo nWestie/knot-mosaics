@@ -40,7 +40,7 @@ pub struct Mosaic {
     tiles: Vec<u8>,
     edges: Vec<ConnEntry>,
     variant: MosaicVariant,
-    size: usize, // grid square size
+    size: usize, // grid side length (aka the Mosaic #)
     len: usize,  // number of tiles
     desc_str: String,
 }
@@ -80,7 +80,10 @@ impl Mosaic {
             MV::Cubic { .. } => {
                 link_cubic_sides(&mut mos);
             }
-            MV::Mobius => todo!("Mobius type not implemented"),
+            MV::Mobius => {
+                mos.link_mobius();
+                mos.link_top_bottom(true);
+            }
         };
         if let MosaicVariant::Cubic { cubic_type } = &mos.variant {
             let non_zero_sides = cubic_from_name(cubic_type).unwrap().sides;
@@ -263,7 +266,9 @@ impl Mosaic {
                     false
                 }
             }
-            _ => todo!("Not Implemented for this type"),
+            MV::Mobius => {
+                self.cross_count() < filters.discard_crossings_below
+            }
         }
     }
     fn cross_count(&self) -> usize {
@@ -396,6 +401,39 @@ impl Mosaic {
             },
             close,
         );
+    }
+    fn link_mobius(&mut self) {
+        let mut edge1 = XYSide {
+            x: 0,
+            y: 0,
+            side: Side::Left,
+        };
+        let mut edge2 = XYSide {
+            x: self.size - 1,
+            y: self.size - 1,
+            side: Side::Right,
+        };
+        let mut i = 0;
+        loop {
+            let ind1 = self.edge_index(&edge1);
+            let ind2 = self.edge_index(&edge2);
+
+            self.edges[ind1] = ConnEntry {
+                conn: Conn::Maybe,
+                connected_to: ind2 as u16,
+            };
+            self.edges[ind2] = ConnEntry {
+                conn: Conn::Maybe,
+                connected_to: ind1 as u16,
+            };
+            // doing this instead of for so nothing goes <0
+            i += 1;
+            if i == self.size {
+                break;
+            }
+            edge1.y += 1;
+            edge2.y -= 1;
+        }
     }
     fn edge_index(&self, edge: &XYSide) -> usize {
         self.index_from_xy(edge.x, edge.y) * 4 + edge.side as usize

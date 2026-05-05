@@ -84,16 +84,14 @@ struct CliArgs {
 fn main() -> Result<()> {
     // let args = CliArgs {
     //     mosaic_size: 3,
-    //     mosaic_type: MosaicVariant::Cubic {
-    //         cubic_type: String::from("4_t"),
-    //     },
+    //     mosaic_type: MosaicVariant::Mobius,
     //     max_lines: 100_000,
     //     base_dir: PathBuf::from("../data"),
     //     filters: Filters {
-    //         discard_crossings_below: 4,
+    //         discard_crossings_below: 0,
     //         remove_loops: true,
     //     },
-    //     resume: true,
+    //     resume: false,
     // };
     let args = CliArgs::parse();
     dbg!(&args);
@@ -128,7 +126,7 @@ struct Generator {
     depth: usize,
     mosaic: Mosaic,
     out_buff: RollingBufWriter,
-    progress: Vec<(usize, usize)>, // (i,n) for each level, stores current index and total count of options
+    progress: Vec<(i32, i32)>, // (i,n) for each level, stores current index and total count of options
     start_ct: u64,
     gen_ct: u64,
 }
@@ -136,15 +134,17 @@ impl Generator {
     fn new(out_buff: RollingBufWriter, mosaic: Mosaic) -> Generator {
         let len = mosaic.get_len();
         let mut branches: Vec<Vec<u8>> = vec![vec![]; len];
+        let mut progress = vec![(0, 1i32); len];
 
         branches[0] = Vec::from(mosaic.get_valid_tiles(0));
         branches[0].reverse(); // this preserves increasing numeric order of the output
+        progress[0] = (-1, branches[0].len() as i32);
         Generator {
             branches,
             depth: 0,
             mosaic,
             out_buff,
-            progress: vec![(0, 1); len],
+            progress,
             start_ct: 0,
             gen_ct: 0,
         }
@@ -190,7 +190,7 @@ impl Generator {
 
         // rebuild mosaic generation object from string
         let mut branches: Vec<Vec<u8>> = vec![vec![]; mosaic.get_len()];
-        let mut progress: Vec<(usize, usize)> = vec![(0, 1); mosaic.get_len()];
+        let mut progress: Vec<(i32, i32)> = vec![(0, 1); mosaic.get_len()];
 
         for (i, ch) in mos_str.chars().enumerate() {
             let possible_vals = mosaic.get_valid_tiles(i);
@@ -207,7 +207,7 @@ impl Generator {
                     ));
                 };
                 // saving progress: "at this level I am on branch i of n"
-                progress[i] = (index, possible_vals.len());
+                progress[i] = (index as i32, possible_vals.len() as i32);
                 branches[i] = possible_vals[index + 1..].to_vec();
                 branches[i].reverse();
                 mosaic.set_tile(i, num);
@@ -274,7 +274,7 @@ fn generate(mut g: Generator, filters: Filters) -> Result<()> {
             g.branches[g.depth].reverse();
             if let Some(item) = g.branches[g.depth].pop() {
                 g.mosaic.set_tile(g.depth, item);
-                g.progress[g.depth] = (0, g.branches[g.depth].len() + 1);
+                g.progress[g.depth] = (0, g.branches[g.depth].len() as i32 + 1);
                 if g.mosaic.is_trivial(&filters) {
                     // this moves to the next branch at this depth.
                     continue 'outer;
@@ -294,21 +294,16 @@ fn generate(mut g: Generator, filters: Filters) -> Result<()> {
             let res = g.out_buff.write_line(&g.mosaic.to_string())?;
             g.gen_ct += 1;
             if let RollOver::Rolled(index) = res {
-                let tot_gen =  (g.gen_ct + g.start_ct) as f64;
                 let progress = g.calc_progress();
-                let est_total = tot_gen/ progress;
-                let est_remain = est_total - tot_gen;
-                let elapsed = t_start.elapsed().as_secs_f64();
-                let rate = (g.gen_ct as f64)/elapsed;
-                let est_dur = (est_remain / rate) as u64;
+                let est_t_remains = estimate_time_remaining(g.gen_ct, g.start_ct, t_start, progress);
                 println!(
                     "{}: on pt{index} - {} generated, {}\n - Est {}:{}:{} remaining",
                     g.mosaic.description_str(),
                     format_num!(",.3s", g.gen_ct as f64),
                     format_num!(".2%", progress),
-                    est_dur / 3600,
-                    (est_dur % 3600) / 60,
-                    est_dur % 60,
+                    est_t_remains / 3600,
+                    (est_t_remains % 3600) / 60,
+                    est_t_remains % 60,
                 );
             }
             if let Some(item) = g.branches[g.depth].pop() {
@@ -327,4 +322,13 @@ fn generate(mut g: Generator, filters: Filters) -> Result<()> {
     println!("Done - {} mosaics generated", g.gen_ct);
     println!("- Completed in {:.6} s)", t_start.elapsed().as_secs_f64(),);
     Ok(())
+}
+
+fn estimate_time_remaining(gen_ct: u64, base_ct: u64, t_start: Instant, progress: f64) -> u64 {
+    let tot_gen = (gen_ct + base_ct) as f64;
+    let est_total = tot_gen / progress;
+    let est_remain = est_total - tot_gen;
+    let elapsed = t_start.elapsed().as_secs_f64();
+    let rate = (gen_ct as f64) / elapsed;
+    (est_remain / rate) as u64
 }

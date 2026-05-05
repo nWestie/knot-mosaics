@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+import itertools
 from math import sqrt
 import math
 from operator import xor
@@ -56,6 +57,12 @@ class NormMosaic:
         else:
             return None
 
+    def set_tile(self, pos: Pos, tile: int):
+        if self.in_bounds(pos):
+            self.tiles[pos.y * self.width + pos.x] = tile
+        else:
+            raise ValueError("Pos out of bounds")
+
     def in_bounds(self, pos: Pos) -> bool:
         return (0 <= pos.x < self.width) and (0 <= pos.y < self.height)
 
@@ -89,7 +96,7 @@ class NormMosaic:
 
     @classmethod
     def build_toric(cls, string: str) -> "NormMosaic":
-        raise NotImplementedError("Need added matrix")
+        raise NotImplementedError("Need added crossings")
         mosaic = cls.build_cylindrical(string)
         # adding the top <-> bottom links
         for i in range(mosaic.width):
@@ -99,6 +106,40 @@ class NormMosaic:
             b2 = MosaicConn(i, mosaic.height - 1, 3)
             mosaic.boundlinks[b1.as_tup] = b2
             mosaic.boundlinks[b2.as_tup] = b1
+        return mosaic
+
+    @classmethod
+    def build_mobius(cls, string: str) -> "NormMosaic":
+        nom_size = int(math.sqrt(len(string)))
+        rows = itertools.batched(string, nom_size)
+        blanks = "0" * nom_size
+        rows = ["".join(r) + blanks for r in rows]
+        tiles = string2tiles("".join(rows))
+        mosaic = NormMosaic(tiles, nom_size * 2, nom_size, nom_size, {})
+        for y_ind in range(nom_size):
+            tile = mosaic.get_tile(Pos(nom_size - 1, y_ind))
+            if tile and 0 in connections_dict[tile].keys():
+                # putting corner in
+                corner_x = nom_size * 2 - 1 - y_ind
+                mosaic.set_tile(Pos(corner_x, y_ind), 4)
+                # filling horizontal row
+                for x_ind in range(nom_size, corner_x):
+                    mosaic.set_tile(Pos(x_ind, y_ind), 5)
+                # filling vertical row (vert or crossings)
+                for y_ind_2 in range(0, y_ind):
+                    pos = Pos(corner_x, y_ind_2)
+                    if mosaic.get_tile(pos) != 0:
+                        mosaic.set_tile(pos, 10)
+                    else:
+                        mosaic.set_tile(pos, 6)
+
+        # link left side to top of mobius flip
+        link_sides(
+            MosaicConn(0, nom_size - 1, 2),
+            MosaicConn(nom_size * 2 - 1, 0, 1),
+            nom_size,
+            mosaic.edge_conns,
+        )
         return mosaic
 
     @classmethod
@@ -171,7 +212,7 @@ parser_types: dict[str, Callable[[str], NormMosaic]] = {
     "flat": NormMosaic.build_flat,
     "cyl": NormMosaic.build_cylindrical,
     "toric": NormMosaic.build_toric,
-    # "mobius": lambda _: print("NOT IMPLEMENTED"),
+    "mobius": NormMosaic.build_mobius,
     "cubic": NormMosaic.build_cubic,
 }
 
