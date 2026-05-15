@@ -9,6 +9,7 @@ from typing import Callable
 import mosaics as M
 import mosaic_vis as mvis
 import mosaic_util as util
+import polynomial_standardization as poly
 
 
 def main():
@@ -215,9 +216,10 @@ def combine_results(args):
     print("writing file and images...")
     # tuples of (knotID, polynomial)
     knot_ids: list[tuple[str, util.KnotResult]] = []
-    for polynomial, res in all_results.items():
+
+    for _, res in all_results.items():
         # yes, I'm re-running the ID/simplify steps.
-        # But the alternative is to run knotID on all the result files...
+        # But the alternative is to run knotID on all the result files, which would be slow
         mosaic = builder(res.mosaic_str)
         knot = M.traverse_mosaic(mosaic, prune_unknots=False)
         if type(knot) is M.NotAKnot:
@@ -236,6 +238,10 @@ def combine_results(args):
         mvis.gen_png(mosaic, res.mosaic_str, knotid, img_path)
         print(f"saved: {img_path}")
 
+        # Update polynomial to standardized form
+        new_polynomial = str(knot.homfly_polynomial(normalization="vz"))
+        new_polynomial = poly.HOMFLY.from_string(new_polynomial)
+        res.polynomial = str(new_polynomial)
         knot_ids.append((knotid, res))
 
     # generate output file

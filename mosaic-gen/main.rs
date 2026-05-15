@@ -235,8 +235,9 @@ impl Generator {
     fn calc_progress(&self) -> f64 {
         let mut denom: f64 = 1.;
         let mut sum: f64 = 0.;
-        // the first 15 levels are probably a good enough guess
-        for (i, n) in self.progress.iter().take(15) {
+        // The amount of places used is arbitrary,
+        // 32 allows even huge grids to give some estimate of completion
+        for (i, n) in self.progress.iter().take(32) {
             denom *= *n as f64;
             sum += (*i as f64) / denom;
         }
@@ -295,7 +296,8 @@ fn generate(mut g: Generator, filters: Filters) -> Result<()> {
             g.gen_ct += 1;
             if let RollOver::Rolled(index) = res {
                 let progress = g.calc_progress();
-                let est_t_remains = estimate_time_remaining(g.gen_ct, g.start_ct, t_start, progress);
+                let est_t_remains =
+                    estimate_time_remaining(g.gen_ct, g.start_ct, t_start, progress);
                 println!(
                     "{}: on pt{index} - {} generated, {}\n - Est {}:{}:{} remaining",
                     g.mosaic.description_str(),
