@@ -259,7 +259,7 @@ def combine_results_cubic() -> Iterable[CubicResult]:
             print(f"Parsing {res_dir}...")
 
             for file in res_dir.glob("*"):
-                results, complete = main_parser.load_result_file(file)
+                results, complete = util.load_result_file(file)
                 if not complete:
                     print(f"WARN: {file} is incomplete")
                 for res in results:

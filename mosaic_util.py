@@ -110,3 +110,16 @@ class KnotResult(IncompleteKnotResult):
         return KnotResult(
             int(parts[0]), parts[1].strip(), int(parts[2]), parts[3].strip()
         )
+    
+def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
+    """Extracts knot results from file. Returns true if file contains the correct end-indicator"""
+    results: list[KnotResult] = []
+    with file.open("r") as inp:
+        for line in inp:
+            # If this line is not present, indicates an interruption during writing.
+            line = line.strip()
+            if line == "END_RESULT":
+                return results, True
+            if line:
+                results.append(KnotResult.from_str(line))
+    return results, False
