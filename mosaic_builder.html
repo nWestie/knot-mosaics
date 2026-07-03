@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <!-- GENERATED WITH CLAUDE AI. I TAKE NO CREDIT FOR THIS WORK. -->
+<head>
+<meta charset="UTF-8">
+<title>Knot Mosaic Generator</title>
+<style>
+  body { font-family: sans-serif; max-width: 600px; margin: 2em auto; padding: 0 1em; }
+  label { display: block; margin-top: 1em; }
+  input[type="text"] { width: 100%; box-sizing: border-box; }
+  canvas { border: 1px solid #ccc; margin-top: 1em; image-rendering: pixelated; max-width: 100%; }
+  button { margin-top: 1em; padding: 0.5em 1em; }
+  #error { color: red; margin-top: 0.5em; }
+</style>
+</head>
+<body>
+  <h1>Knot Mosaic Generator</h1>
+
+  <label>Width (tiles per row)
+    <input type="number" id="width" value="4" min="1">
+  </label>
+
+  <label>Mosaic string (hex digits, one per tile)
+    <input type="text" id="mosaicString" value="0210289139a40340">
+  </label>
+
+  <div id="error"></div>
+  <canvas id="canvas"></canvas>
+  <br>
+  <button id="downloadBtn">Download PNG</button>
+  <div id="fileWarning" style="display:none; margin-top:0.5em; color:#a60;">
+    Download may not work when opening this file directly (file://).
+    If it fails, right-click the image above and choose "Copy Image" or "Save Image As".
+  </div>
+
+<script>
+const widthInput = document.getElementById('width');
+const stringInput = document.getElementById('mosaicString');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const errorDiv = document.getElementById('error');
+const downloadBtn = document.getElementById('downloadBtn');
+
+const tileCache = {};
+
+function loadTile(index) {
+  if (tileCache[index]) return tileCache[index];
+  const img = new Image();
+  img.src = `tiles/t${index}.png`;
+  const promise = new Promise((resolve, reject) => {
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load tiles/t${index}.png`));
+  });
+  tileCache[index] = { img, promise };
+  return tileCache[index];
+}
+
+async function render() {
+  errorDiv.textContent = '';
+  const str = stringInput.value.trim();
+  const width = parseInt(widthInput.value, 10);
+
+  if (!str) return;
+  if (!/^[0-9acAC]+$/.test(str)) {
+    errorDiv.textContent = 'Mosaic string must be hex digits (0-9, a,or c) only.';
+    return;
+  }
+  if (!width || width < 1) {
+    errorDiv.textContent = 'Width must be a positive integer.';
+    return;
+  }
+  if (str.length % width !== 0) {
+    errorDiv.textContent = `String length (${str.length}) is not divisible by width (${width}).`;
+    return;
+  }
+
+  const indices = [...str].map(c => parseInt(c, 16));
+  const height = str.length / width;
+
+  try {
+    const loaded = await Promise.all(indices.map(i => loadTile(i).promise));
+    const tileW = loaded[0].naturalWidth;
+    const tileH = loaded[0].naturalHeight;
+
+    canvas.width = tileW * width;
+    canvas.height = tileH * height;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    loaded.forEach((img, i) => {
+      const col = i % width;
+      const row = Math.floor(i / width);
+      ctx.drawImage(img, col * tileW, row * tileH);
+    });
+  } catch (e) {
+    errorDiv.textContent = e.message;
+  }
+}
+
+downloadBtn.addEventListener('click', () => {
+  const link = document.createElement('a');
+  link.download = 'mosaic.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+if (location.protocol === 'file:') {
+  document.getElementById('fileWarning').style.display = 'block';
+}
+
+widthInput.addEventListener('input', render);
+stringInput.addEventListener('input', render);
+render();
+</script>
+</body>
+</html>
