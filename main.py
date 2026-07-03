@@ -57,7 +57,7 @@ def main():
         "-i",
         "--ignore-incomplete",
         help="Allow parsing of incomplete result folders",
-        action="store_true"
+        action="store_true",
     )
     parse.set_defaults(func=run_catalog)
 
@@ -70,6 +70,11 @@ def main():
         "--cubic-version",
         help="Type of cubic to pull results from, must match the folder path",
         type=str,
+    )
+    merge.add_argument(
+        "--keep-existing",
+        help="Keep existing knot mosaic imgs",
+        action="store_true"
     )
     merge.set_defaults(func=combine_results)
 
@@ -179,7 +184,7 @@ def run_catalog(args):
 def combine_results(args):
     """Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
 
-    from sage_funcs import make_knot
+    import sage_funcs
 
     mosaic_type = args.type
     builder = M.parser_types[args.type]
@@ -189,19 +194,28 @@ def combine_results(args):
         print(f"ERR: no results to merge for {results_folder}")
         return
 
-    imgs = util.img_dir(mosaic_type, args.cubic_version)
-    if imgs.exists():
-        [f.unlink() for f in imgs.iterdir()]
+    # initialize images folder
+    imgs_dir = util.img_dir(mosaic_type, args.cubic_version)
+    existing_imgs:dict[str, str] = {}
+    if imgs_dir.exists():
+        if args.keep_existing:
+            # mapping from mosaic to knotID
+            for img in imgs_dir.glob("*.png"):
+                parts = img.stem.split("-")
+                existing_imgs[parts[2]] = parts[1]
+        else:
+            [f.unlink() for f in imgs_dir.iterdir()]
     else:
-        imgs.mkdir(parents=True)
+        imgs_dir.mkdir(parents=True)
 
+    # initialize output file
     out_file = util.output_path(mosaic_type, args.cubic_version)
-
+    if out_file.is_file():
+        out_file.unlink()
     # maps polynomial to knot result
     all_results: dict[str, util.KnotResult] = {}
 
     # merge results, keeping lowest tile number
-
     for file in results_folder.iterdir():
         results, complete = load_result_file(file)
         if not complete:
@@ -212,12 +226,11 @@ def combine_results(args):
             if res.better_than(prev_best):
                 all_results[res.polynomial] = res
 
-    # generate images
-    print("writing file and images...")
+    print(f"Calculating knot IDs for {len(all_results)} mosaics...")
     # tuples of (knotID, polynomial)
     knot_ids: list[tuple[str, util.KnotResult]] = []
 
-    for _, res in all_results.items():
+    for ct, (_, res) in enumerate(all_results.items()):
         # yes, I'm re-running the ID/simplify steps.
         # But the alternative is to run knotID on all the result files, which would be slow
         mosaic = builder(res.mosaic_str)
@@ -225,24 +238,36 @@ def combine_results(args):
         if type(knot) is M.NotAKnot:
             print(f"ERR: Not a Knot({type(knot)}): {res.mosaic_str}")
             break
-        knot = make_knot(knot)  # type:ignore
+        knot = sage_funcs.make_knot(knot)  # type: ignore
         new_knot = knot.simplify()
         if new_knot is not None:
             knot = new_knot
-        # this can be quite slow for some knots
-        knotid = str(knot.get_knotinfo(unique=False))  # type: ignore
-        # cleaning up the KnotInfo output
-        for s in ["KnotInfo", "[", "]", "'"]:
-            knotid = knotid.replace(s, "")
-        img_path = util.img_filepath(imgs, res, knotid)
-        mvis.gen_png(mosaic, res.mosaic_str, knotid, img_path)
-        print(f"saved: {img_path}")
+
+        if (knotid := existing_imgs.get(res.mosaic_str)) is not None:
+            print(f"{ct}- keeping img for {knotid}")
+        else:
+            # this can be *VERY* slow for some knots. Times out after 60 seconds
+            knotid = sage_funcs.get_knotinfo_with_timeout(knot, 60)
+            if knotid is None:
+                print(f"TIMEOUT ERROR getting knotID for {knot}, mosaic: {res.mosaic_str}")
+                knotid = "UNKNOWN"
+            else:
+                # cleaning up the KnotInfo output
+                for s in ["KnotInfo", "[", "]", "'"]:
+                    knotid = knotid.replace(s, "")
+
+            # generating and saving image
+            img_path = util.img_filepath(imgs_dir, res, knotid)
+            mvis.gen_png(mosaic, res.mosaic_str, knotid, img_path)
+            print(f"{ct}- saved: {img_path}")
 
         # Update polynomial to standardized form
         new_polynomial = str(knot.homfly_polynomial(normalization="vz"))
         new_polynomial = poly.HOMFLY.from_string(new_polynomial)
         res.polynomial = str(new_polynomial)
-        knot_ids.append((knotid, res))
+        knot_ids.append((knotid, res)) # type: ignore - this is protected from being none
+        with out_file.open("a") as out:
+            out.write(f"{knotid}|{res.to_str()}\n")
 
     # generate output file
     knot_ids.sort(key=lambda k: k[0])
@@ -373,7 +398,7 @@ def handle_str(args):
         print(f"Bad Mosaic: {mosaic_str}")
         return
     knot = make_knot(knot)  # type: ignore
-    if not knot or not knot.is_knot():  # type:ignore
+    if not knot or not knot.is_knot():  # type: ignore
         print("Mosaic is not a knot")
         return
         # knot = knot.simplify(exhaustive=True, height=3)

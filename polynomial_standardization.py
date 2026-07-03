@@ -1,13 +1,11 @@
-import csv
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-from sympy import symbols, Poly, expand
+from sympy import symbols, expand
 from sympy.parsing.sympy_parser import parse_expr
-from sage.all import KnotInfo  # type: ignore
+
+# from sage.all import KnotInfo  # type: ignore
 import mosaics as M
-import sage_funcs
 
 v, z = symbols("v z")
 
@@ -22,6 +20,8 @@ class Term:
         out = []
         match self.coeff:
             case 1:
+                if (self.v_pow == 0) and (self.z_pow == 0):
+                    return "1"
                 pass
             case -1:
                 out.append("-1")
@@ -74,15 +74,31 @@ class HOMFLY:
         """
         Parse HOMFLY polynomial string into standard form using SymPy.
         """
-        string = string.replace("^", "**")
+        string = string.replace("^", "**").strip()
         expr = parse_expr(string, local_dict={"v": v, "z": z})
         poly = expand(expr)
-        terms = (Term.from_scipy(t) for t in poly.as_ordered_terms())
+        terms = [Term.from_scipy(t) for t in poly.as_ordered_terms()]
         return HOMFLY(cls.sort(terms))
+
     @classmethod
-    def sort(cls, terms: Iterable[Term])->tuple[Term,...]:
+    def from_mosaic(cls, mosaic: M.NormMosaic):
+        """Build HOMFLY polynomial from mosaic object"""
+        import sage_funcs
+
+        # getting polynomial from mosaic
+        pd = M.traverse_mosaic(mosaic, prune_unknots=False)
+        assert type(pd) is list
+        knot = sage_funcs.make_knot(pd)
+        new_knot = knot.simplify()
+        if new_knot is not None:
+            knot = new_knot
+        knot_homf = knot.homfly_polynomial(normalization="vz")
+        return cls.from_string(str(knot_homf))
+
+    @classmethod
+    def sort(cls, terms: Iterable[Term]) -> tuple[Term, ...]:
         """puts terms in canonical order, sorted first by z power, than v"""
-        return tuple(sorted(terms,key=lambda t: t.ordering(),reverse=True))
+        return tuple(sorted(terms, key=lambda t: t.ordering(), reverse=True))
 
     def invert_v(self) -> "HOMFLY":
         terms = [t.invert_v() for t in self.terms]
@@ -96,8 +112,39 @@ class HOMFLY:
         return " + ".join(str(t) for t in self.terms)
 
 
-def main():
-    # list of all knots that correspond to a specific polynomial
+class KnotIDDB:
+    """A lookup from homfly to knotID(s)"""
+
+    def lookup(self, poly: str | HOMFLY) -> list[str] | None:
+        if type(poly) is str:
+            poly = HOMFLY.from_string(poly)
+        res = self.lookup_table.get(poly)  # type: ignore
+        if res is not None:
+            return res
+        return self.lookup_table.get(poly.invert_v())  # type: ignore
+
+    def __init__(
+        self, LUT_file: Path = Path("homflys/knotsToHOMFLY.txt"), max_size: int = 14
+    ):
+        self.lookup_table: dict[HOMFLY, list[str]] = {}
+        last_size = ""
+        for line in LUT_file.open():
+            knots, homf = line.split("|")
+            knots = [k.strip() for k in knots.split(",")]
+
+            # status printing
+            size = knots[0][0:2].removesuffix("_")
+            if size != last_size:
+                if int(size) > max_size:
+                    return
+                print(size)
+                last_size = size
+            # save key
+            key = HOMFLY.from_string(homf)
+            self.lookup_table[key] = knots
+
+
+def build_lookup():
     master_dict: dict[HOMFLY, list[str]] = {}
     with Path("homflys3-13.csv").open() as f:
         f.readline()
@@ -107,8 +154,8 @@ def main():
             inv_eqn = eqn.invert_v()
 
             # break early for testing
-            # if id.removeprefix("11") != id:
-            #     break
+            if id.removeprefix("10_165") != id:
+                pass
             print(id)
             if eqn in master_dict:
                 master_dict[eqn].append(id)
@@ -120,24 +167,18 @@ def main():
     with Path("data/knotsToHOMFLY.txt").open("w") as f:
         for key, vals in master_dict.items():
             # if len(vals) > 1:
-            print(", ".join(vals), "|",key, file=f)
+            print(", ".join(vals), "|", key, file=f)
 
 
-def test_terms():
-    # getting polynomial from mosaic
-    mosaic = M.NormMosaic.build_flat("00000000210002a9102a8a9139a9a4034340")
-    pd = M.traverse_mosaic(mosaic)
-    assert type(pd) is list
-    knot = sage_funcs.make_knot(pd)
-    knot.simplify()
-    knot_homf = knot.homfly_polynomial(normalization="vz")
+def main():
+    mosaic = M.NormMosaic.build_mobius("2125a9a1639a4034")
+    knot_poly = HOMFLY.from_mosaic(mosaic)
+    print(knot_poly)
+    # # list of all knots that correspond to a specific polynomial
+    knots = KnotIDDB(max_size=10)
 
-    knotinfo_homf = "(v^4+ v^6-v^10)+ (v^2+ 2*v^4+ 2*v^6+ v^8)*z^2"
-    h1 = HOMFLY.from_string(str(knot_homf)).invert_v()
-    h2 = HOMFLY.from_string(knotinfo_homf)
-    print(h1,h2,h1==h2,sep="\n")
-    exit()
+    print(knots.lookup(knot_poly))
+
 
 if __name__ == "__main__":
-    # exit(test_terms())
     exit(main())

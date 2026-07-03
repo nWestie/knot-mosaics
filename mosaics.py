@@ -51,6 +51,9 @@ class NormMosaic:
         lambda p: MosaicConn(p.x, p.y + 1, 1),
     ]  # type: ignore
 
+    def __repr__(self) -> str:
+        return tiles2string(self.tiles)
+
     def get_tile(self, pos: Pos) -> int | None:
         if self.in_bounds(pos):
             return self.tiles[pos.y * self.width + pos.x]
@@ -304,8 +307,8 @@ def traverse_mosaic(  # type: ignore
     if exp_moves != move_ct and prune_links:
         return NotAKnot.LINK
     # if there are < 3 crossings, must be an unknot
-    if len(under_crosses) < 3 and prune_unknots:
-        return NotAKnot.UNKNOT
+    if len(under_crosses) < 3:
+        return NotAKnot.UNKNOT if prune_unknots else []
     # calculating the PD codes from the crossing data
     # see https://katlas.org/wiki/Planar_Diagrams
     max_edge = 2 * len(under_crosses)
