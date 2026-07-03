@@ -24,6 +24,9 @@ def count_tiles(mosaic: str | list[int]) -> int:
         return len([t for t in mosaic if (t not in ["0", "c"])])
     return len([t for t in mosaic if (t not in [0, 12])])
 
+def knot_size_from_id(knot_id: str)->int:
+    return int(knot_id[0:2].removesuffix("_"))
+
 
 def mosaic_dir(type: str, size: int, cubic_type: str | None = None) -> Path:
     # get the input folder of mosaics

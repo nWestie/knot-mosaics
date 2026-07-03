@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 from pathlib import Path
+import pickle
+from time import time
 from typing import Iterable
 from sympy import symbols, expand
 from sympy.parsing.sympy_parser import parse_expr
-
+import mosaic_util as util
 # from sage.all import KnotInfo  # type: ignore
 import mosaics as M
 
@@ -12,6 +14,8 @@ v, z = symbols("v z")
 
 @dataclass(frozen=True)
 class Term:
+    """A single term of a homfly polynomial"""
+
     coeff: int
     v_pow: int
     z_pow: int
@@ -67,6 +71,8 @@ class Term:
 
 @dataclass(frozen=True)
 class HOMFLY:
+    """A homfly polynomial, parsed into a standard form"""
+
     terms: tuple[Term, ...]
 
     @classmethod
@@ -113,7 +119,7 @@ class HOMFLY:
 
 
 class KnotIDDB:
-    """A lookup from homfly to knotID(s)"""
+    """A lookup table from homfly to knotID(s)"""
 
     def lookup(self, poly: str | HOMFLY) -> list[str] | None:
         if type(poly) is str:
@@ -123,22 +129,31 @@ class KnotIDDB:
             return res
         return self.lookup_table.get(poly.invert_v())  # type: ignore
 
+    @classmethod
+    def load_from_file(cls, path: Path) -> "KnotIDDB":
+        with path.open("rb") as file:
+            knots: KnotIDDB = pickle.load(file)
+            if type(knots) is not KnotIDDB:
+                raise ValueError(f"{path} is not a KnotIDDB pickle")
+        return knots
+
+    def dump_to_file(self, path: Path):
+        with path.open("wb") as file:
+            pickle.dump(self, file)
+
     def __init__(
         self, LUT_file: Path = Path("homflys/knotsToHOMFLY.txt"), max_size: int = 14
     ):
         self.lookup_table: dict[HOMFLY, list[str]] = {}
-        last_size = ""
+
         for line in LUT_file.open():
             knots, homf = line.split("|")
             knots = [k.strip() for k in knots.split(",")]
 
             # status printing
-            size = knots[0][0:2].removesuffix("_")
-            if size != last_size:
-                if int(size) > max_size:
-                    return
-                print(size)
-                last_size = size
+            size = util.knot_size_from_id(knots[0])
+            if size > max_size:
+                return
             # save key
             key = HOMFLY.from_string(homf)
             self.lookup_table[key] = knots
@@ -146,16 +161,13 @@ class KnotIDDB:
 
 def build_lookup():
     master_dict: dict[HOMFLY, list[str]] = {}
-    with Path("homflys3-13.csv").open() as f:
-        f.readline()
+    with Path("homflys/homflys3-13.csv").open() as f:
+        f.readline()  # Remove header
         for line in f:
             id, string = line.split(",")
             eqn = HOMFLY.from_string(string)
             inv_eqn = eqn.invert_v()
 
-            # break early for testing
-            if id.removeprefix("10_165") != id:
-                pass
             print(id)
             if eqn in master_dict:
                 master_dict[eqn].append(id)
@@ -164,19 +176,28 @@ def build_lookup():
             else:
                 master_dict[eqn] = [id]
 
-    with Path("data/knotsToHOMFLY.txt").open("w") as f:
+    with Path("homflys/knotsToHOMFLY.txt").open("w") as f:
         for key, vals in master_dict.items():
             # if len(vals) > 1:
             print(", ".join(vals), "|", key, file=f)
 
 
 def main():
+    # build_lookup()
+
+    # Testing
+    # print(knot_poly)
+    # # list of all knots that correspond to a specific polynomial
+
+    # knots = KnotIDDB(max_size=14)
+    pkl_file = Path("data/knotIDDB.pkl")
+    # print("loaded")
+
+    s_time = time()
+    knots = KnotIDDB.load_from_file(pkl_file)
+    print(f"Load Time: {time()-s_time:.4g}")
     mosaic = M.NormMosaic.build_mobius("2125a9a1639a4034")
     knot_poly = HOMFLY.from_mosaic(mosaic)
-    print(knot_poly)
-    # # list of all knots that correspond to a specific polynomial
-    knots = KnotIDDB(max_size=10)
-
     print(knots.lookup(knot_poly))
 
 
