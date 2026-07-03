@@ -24,12 +24,13 @@ def count_tiles(mosaic: str | list[int]) -> int:
         return len([t for t in mosaic if (t not in ["0", "c"])])
     return len([t for t in mosaic if (t not in [0, 12])])
 
-def knot_size_from_id(knot_id: str)->int:
+
+def knot_size_from_id(knot_id: str) -> int:
     return int(knot_id[0:2].removesuffix("_"))
 
 
 def mosaic_dir(type: str, size: int, cubic_type: str | None = None) -> Path:
-    # get the input folder of mosaics
+    """get the input folder of mosaics"""
     path = Path(f"data/{size}_{type}")
     if cubic_type and type == "cubic":
         path /= cubic_type
@@ -44,6 +45,15 @@ def results_dir(type: str, cubic_type: str | None = None) -> Path:
     return path
 
 
+def results_dir_knotID(type: str, cubic_type: str | None = None) -> Path:
+    """Get the output folder of intermediate results, based on knotID instead of polynomial"""
+    path = Path(f"data/{type}_res_knID")
+    if cubic_type and type == "cubic":
+        path /= cubic_type
+    return path
+
+
+# dir of final results
 output_dir = Path(f"output/")
 
 
@@ -60,19 +70,21 @@ def img_dir(type: str, cubic_type: str | None = None) -> Path:
     return path
 
 
-def img_filepath(dir: Path, res: "KnotResult", knotid: str):
+def img_filepath(dir: Path, res: "KnotResult"):
     """Path where an image for a specific result should be stored"""
-    img_path = dir / (f"{res.size}-{knotid}-{res.mosaic_str}.png")
+    img_path = dir / (f"{res.size}-{res.knotID}-{res.mosaic_str}.png")
     return img_path
 
 
 @dataclass
-class IncompleteKnotResult:
+class KnotResult:
     """Seperating this allows us to compare results without calculating the polynomial"""
 
     size: int
     mosaic_str: str
     tile_ct: int
+    polynomial: str
+    knotID: str
 
     def better_than(self, other: "KnotResult|None") -> bool:
         """Returns True if self is the preferred result over other"""
@@ -90,27 +102,19 @@ class IncompleteKnotResult:
         # TODO: Implement edge connections metric?
         # fewer edge connections preferred. Would be super annoying with only results
 
-    def to_result(self, polynomial: str) -> "KnotResult":
+    def to_result(self, polynomial: str, ID) -> "KnotResult":
         """Adds a polnomial to make a complete knot result"""
-        return KnotResult(self.size, self.mosaic_str, self.tile_ct, polynomial)
-
-
-@dataclass
-class KnotResult(IncompleteKnotResult):
-    """Intermediate format for knot results"""
-
-    polynomial: str
+        return KnotResult(self.size, self.mosaic_str, self.tile_ct, polynomial, ID)
 
     def to_str(self) -> str:
-        return f"{self.size}|{self.mosaic_str}|{self.tile_ct}|{self.polynomial}"
+        return f"{self.knotID:<8}|{self.size:>4} |{self.mosaic_str}|{self.tile_ct:>4} |{self.polynomial}"
 
     @classmethod
     def from_str(cls, str: str):
-        parts = str.strip().split("|")
-        return KnotResult(
-            int(parts[0]), parts[1].strip(), int(parts[2]), parts[3].strip()
-        )
-    
+        parts = [s.strip() for s in str.split("|")]
+        return KnotResult(int(parts[1]), parts[2], int(parts[3]), parts[4], parts[0])
+
+
 def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
     """Extracts knot results from file. Returns true if file contains the correct end-indicator"""
     results: list[KnotResult] = []

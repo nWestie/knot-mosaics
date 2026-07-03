@@ -22,21 +22,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
 
-import main as main_parser
-import mosaic_util as util
 
-# from sympy.core.traversal import Iterator
+import mosaic_util as util
 import mosaic_vis as mvis
 import mosaics as M
 from polynomial_standardization import HOMFLY, KnotIDDB
-
-# PIL is only imported when actually needed (inside _save_images).
-# This keeps the script importable even without Pillow if you only need
-# to inspect or extend the generation logic.
-
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
+import sage_funcs
 
 
 @dataclass
@@ -198,15 +189,23 @@ class KnotIDTable:
                 mosaic = M.NormMosaic.build_flat(res.mosaic_str)
             else:
                 mosaic = M.NormMosaic.build_cubic(res.mosaic_str)
-            # get polynomial and knot ID
-            # - this is a fairly expensive step
-            poly = HOMFLY.from_mosaic(mosaic)
+            
+            # getting polynomial from mosaic
+            pd = M.traverse_mosaic(mosaic, prune_unknots=False)
+            assert type(pd) is list
+            
+            # get knot, polynomial (slow)
+            knot = sage_funcs.make_knot(pd)
+            poly = HOMFLY.from_knot(knot)
+            # possible knot IDs based on polynomial
             knotIDs = lut.lookup(poly)
+
             # this discards any knots that only
             if knotIDs is None:
                 continue
             # a polynomial may have multiple possible knot IDs
             # this saves the best result for each knotID+size
+            # TODO: This is incorrect, its assuming the parsed mosaic is ALL the candidate knot IDs
             for id in knotIDs:
                 key = self._key_gen(id, res.size)
                 if cubic_better_than(res, self.table.get(key)):
@@ -328,6 +327,7 @@ def main():
     print("Zipping site...")
     downloads = Path("/mnt/c/Users/westn/Downloads/")
     zip_and_save(output_file, downloads)
+
 
 if __name__ == "__main__":
     exit(main())

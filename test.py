@@ -25,3 +25,5 @@ from polynomial_standardization import KnotIDDB
 
 if __name__ == "__main__":
     pkl_file = Path("data/knotIDDB.pkl")
+    knotDB = KnotIDDB.load_from_file(pkl_file)
+    # knotDB.dump_to_file(pkl_file)

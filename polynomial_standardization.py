@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import functools
 from pathlib import Path
 import pickle
 from time import time
@@ -76,6 +77,7 @@ class HOMFLY:
     terms: tuple[Term, ...]
 
     @classmethod
+    @functools.cache
     def from_string(cls, string):
         """
         Parse HOMFLY polynomial string into standard form using SymPy.
@@ -87,17 +89,8 @@ class HOMFLY:
         return HOMFLY(cls.sort(terms))
 
     @classmethod
-    def from_mosaic(cls, mosaic: M.NormMosaic):
+    def from_knot(cls, knot):
         """Build HOMFLY polynomial from mosaic object"""
-        import sage_funcs
-
-        # getting polynomial from mosaic
-        pd = M.traverse_mosaic(mosaic, prune_unknots=False)
-        assert type(pd) is list
-        knot = sage_funcs.make_knot(pd)
-        new_knot = knot.simplify()
-        if new_knot is not None:
-            knot = new_knot
         knot_homf = knot.homfly_polynomial(normalization="vz")
         return cls.from_string(str(knot_homf))
 
@@ -121,7 +114,7 @@ class HOMFLY:
 class KnotIDDB:
     """A lookup table from homfly to knotID(s)"""
 
-    def lookup(self, poly: str | HOMFLY) -> list[str] | None:
+    def lookup(self, poly: str | HOMFLY) -> tuple[str,...] | None:
         if type(poly) is str:
             poly = HOMFLY.from_string(poly)
         res = self.lookup_table.get(poly)  # type: ignore
@@ -144,11 +137,11 @@ class KnotIDDB:
     def __init__(
         self, LUT_file: Path = Path("homflys/knotsToHOMFLY.txt"), max_size: int = 14
     ):
-        self.lookup_table: dict[HOMFLY, list[str]] = {}
+        self.lookup_table: dict[HOMFLY, tuple[str,...]] = {}
 
         for line in LUT_file.open():
             knots, homf = line.split("|")
-            knots = [k.strip() for k in knots.split(",")]
+            knots = tuple(k.strip() for k in knots.split(","))
 
             # status printing
             size = util.knot_size_from_id(knots[0])
@@ -160,6 +153,7 @@ class KnotIDDB:
 
 
 def build_lookup():
+    """Constructs a Lookup-file - each line is a list of knot IDs, and their homfly in a standardized form"""
     master_dict: dict[HOMFLY, list[str]] = {}
     with Path("homflys/homflys3-13.csv").open() as f:
         f.readline()  # Remove header
@@ -197,7 +191,7 @@ def main():
     knots = KnotIDDB.load_from_file(pkl_file)
     print(f"Load Time: {time()-s_time:.4g}")
     mosaic = M.NormMosaic.build_mobius("2125a9a1639a4034")
-    knot_poly = HOMFLY.from_mosaic(mosaic)
+    knot_poly = HOMFLY.from_knot(mosaic)
     print(knots.lookup(knot_poly))
 
 

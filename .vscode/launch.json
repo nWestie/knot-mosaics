@@ -25,7 +25,8 @@
             "request": "launch",
             "program": "./main.py",
             "console": "integratedTerminal",
-            "args": "merge mobius --keep-existing", 
+            "args": "merge mobius", 
+            // "args": "file data/5_mobius/pt0019.txt data/tempout.txt mobius", 
         },
     ]
 }

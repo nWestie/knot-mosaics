@@ -63,11 +63,6 @@ def knot_argparser()->argparse.ArgumentParser:
         help="Type of cubic to pull results from, must match the folder path",
         type=str,
     )
-    merge.add_argument(
-        "--keep-existing",
-        help="Keep existing knot mosaic imgs",
-        action="store_true"
-    )
     merge.set_defaults(func=main.combine_results)
 
     file = subs.add_parser("file", help="parse single file")

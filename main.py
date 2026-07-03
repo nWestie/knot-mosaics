@@ -1,11 +1,11 @@
 #! /usr/bin/env python
-import argparse
 from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import current_process
 from pathlib import Path
 import threading
 from time import sleep, time
 from typing import Callable
+
 import mosaics as M
 import mosaic_vis as mvis
 import mosaic_util as util
@@ -30,7 +30,7 @@ def run_catalog(args):
     builder: Callable[[str], M.NormMosaic] = M.parser_types[type]
 
     inp_dir = util.mosaic_dir(type, size, args.cubic_version)
-    out_dir = util.results_dir(type, args.cubic_version)
+    out_dir = util.results_dir_knotID(type, args.cubic_version)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not inp_dir.is_dir() or len(list(inp_dir.iterdir())) == 0:
@@ -40,6 +40,7 @@ def run_catalog(args):
         print("STOPPING: Mosaic list is not complete")
         print("run with --ignore-incomplete to proceed anyway")
         return
+
     # Thread to wait for user input without blocking main tasks
     stop_event = threading.Event()  # will be set by keypress thread
     if not args.no_clean_exit:
@@ -114,38 +115,41 @@ def run_catalog(args):
         print("fully shutdown now")
 
 
-def catalog_files(
-    in_files: list[Path], out_file: Path, builder: Callable
-) -> tuple[list[util.KnotResult], int]:
+def catalog_files(in_files: list[Path], out_file: Path, builder: Callable):
     """Finds all unique knots in a set of files"""
 
     from sage_funcs import make_knot
 
-    # maps polynomial to tile number/mosaic
-    knot_bank: dict[str, util.KnotResult] = {}
+    # maps knotID to a result object
+    knot_res_byID: dict[str, util.KnotResult] = {}
+    
+    # maps polynomials to their knotID(s)
+    # Contains all prime knots thru size 13, we don't care about above that
+    knotID_DB = poly.KnotIDDB.load_from_file(Path("data/knotIDDB.pkl"))
 
-    # Dict mapping all seen PD codes to their polynomial.
+    # dict Cache mapping all seen PD codes to their knotID.
     # All knots with the same PD codes are the same knot.
-    all_pd: dict[str, str] = {}
-
-    # keep track of how many we've parsed
-    line_ct = 0
-
-    # iterating over each line in each file in the dir
-    print(
-        f"Starting {', '.join(f.stem for f in in_files)} on {current_process().name}",
-        flush=True,
-    )
-    start_t = time()
+    pd_code_cache: dict[str, str] = {}
+    # list of mosaics with bad connections
     bad_mosaics: list[str] = []
 
-    # Iterator over mosaics
+    # iterating over each line in each file in the dir
+    in_files_str = ", ".join(f.stem for f in in_files)
+    print(
+        f"Starting {in_files_str} on {current_process().name}",
+        flush=True,
+    )
+
+    # Define an flattened iterator over mosaic strings
     def iter_lines():
         for f_name in in_files:
             with f_name.open("r") as f:
                 for mosaic_str in f:
                     yield mosaic_str
 
+    # keep track of how many we've parsed
+    line_ct = 0
+    start_t = time()
     for mosaic_str in iter_lines():
         line_ct += 1
 
@@ -153,160 +157,139 @@ def catalog_files(
         mosaic_str = mosaic_str.strip()
         mosaic: M.NormMosaic = builder(mosaic_str)
         pd_codes = M.traverse_mosaic(mosaic, prune_unknots=False)
+        pd_codes_str = str(pd_codes)
 
         # discard non-knot mosaics
         if type(pd_codes) is M.NotAKnot:
             match pd_codes:
                 case M.NotAKnot.BAD_CONNECTIONS:
-                    bad_mosaics.append(f"{str(pd_codes)}, {mosaic_str}\n")
+                    bad_mosaics.append(f"{pd_codes_str}, {mosaic_str}\n")
             continue
-
-        # Build knot result
-        tile_ct = util.count_tiles(mosaic_str)
-        new_res = util.IncompleteKnotResult(mosaic.nominal_size, mosaic_str, tile_ct)
 
         # If this PD code has been seen before, we already know the polynomial
-        if (existing_poly := all_pd.get(str(pd_codes))) is not None:
-            # If this knot is better than the best existing knot
-            # for this polynomial, replace it.
-            if new_res.better_than(knot_bank[existing_poly]):
-                knot_bank[existing_poly] = new_res.to_result(existing_poly)
-            continue
+        knotID = pd_code_cache.get(pd_codes_str)
+        if knotID is None:
+            # If there's no cached polynomial, calculate it
+            knot = make_knot(pd_codes)  # type: ignore
+            polynomial = poly.HOMFLY.from_knot(knot)
+            knotIDs = knotID_DB.lookup(polynomial)
 
-        # Parse knot using sage
-        knot = make_knot(pd_codes)  # type: ignore
-        new_knot = knot.simplify()
-        if new_knot:
-            knot = new_knot
+            if knotIDs is None:
+                # No entries in DB, so it's composite or >13 crossings
+                continue
+            elif len(knotIDs) == 1:
+                # This polynomial can only be one knot
+                # TODO: Technically it could be a >13 crossing knot that collides
+                # with a low-crossing knot. No great way to filter for this
+                knotID = knotIDs[0]
+            else:
+                knotID = disambiguate_knot(knotIDs, knot)
+            # cache this pd->knotID relation
+            pd_code_cache[pd_codes_str] = knotID
 
-        new_res = new_res.to_result(str(knot.homfly_polynomial()))
-        all_pd[str(pd_codes)] = new_res.polynomial
-
-        # TODO: Update this portion to handle polynomial
-        # Same knot -> always same polynomial
-        # Different knot -> *usually* different polynomial
-        # This means there are SOME polynomial collisions
-        prev_best = knot_bank.get(new_res.polynomial)
-        if new_res.better_than(prev_best):
-            knot_bank[new_res.polynomial] = new_res
-
+        # Build the new knot result
+        tile_ct = util.count_tiles(mosaic_str)
+        new_res = util.KnotResult(
+            mosaic.nominal_size, mosaic_str, tile_ct, str(polynomial), knotID
+        )
+        # replace the result for this knot if the new one is better
+        prev_best_res = knot_res_byID.get(knotID)
+        if new_res.better_than(prev_best_res):
+            knot_res_byID[knotID] = new_res
     d_time = time() - start_t
 
+    # Warn about bad mosaics
     if len(bad_mosaics):
-        print(f"WARN: Bad Mosaics in {', '.join(f.stem for f in in_files)}", flush=True)
+        print(f"WARN: Bad Mosaics in {in_files_str}", flush=True)
         [print(mos) for mos in bad_mosaics]
 
     # write results to file
     with out_file.open("w") as out:
-        lines = [(r.to_str() + "\n") for r in knot_bank.values()]
+        lines = [(r.to_str() + "\n") for r in knot_res_byID.values()]
         out.writelines(lines)
         out.write("END_RESULT")  # confirms that result was not interrupted
 
     # print result to console
     print(
-        f"Parsed {line_ct:,} from {', '.join(f.stem for f in in_files)} in {d_time:.0f}s"
+        f"Parsed {line_ct:,} from {in_files_str} in {d_time:.0f}s"
         + f" ({line_ct/d_time:.0f} lines/s)",
         flush=True,
     )
-    return list(knot_bank.values()), line_ct
+
+
+def disambiguate_knot(knotIDs: tuple[str,...], knot) -> str:
+    # number of crossings of the simplified knot
+    # may still be > the minimum-crossing-number
+    max_crossings = len(knot.pd_code())
+    valid = [id for id in knotIDs if util.knot_size_from_id(id)<=max_crossings]
+    if len(valid) == 1:
+        return valid[0]
+    print(f"Using sage to disambiguate: {",".join(valid)}")
+
+    # this can be *VERY* slow for some knots. Times out after 60 seconds
+    from sage_funcs import get_knotinfo_with_timeout
+    knotid = get_knotinfo_with_timeout(knot, 60)
+    if knotid is None:
+        print(f"DISAMBIGUATION_FAILED, Timeout-{",".join(valid)}")
+        return f"AMBIGUOUS-{",".join(valid)}"
+    else:
+        # cleaning up the KnotInfo output
+        for s in ["KnotInfo", "[", "]", "'"]:
+            knotid = knotid.replace(s, "")
+        
 
 
 def combine_results(args):
     """Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
 
-    import sage_funcs
-
     mosaic_type = args.type
     builder = M.parser_types[args.type]
 
-    results_folder = util.results_dir(mosaic_type, args.cubic_version)
+    # check that there are results to merge
+    results_folder = util.results_dir_knotID(mosaic_type, args.cubic_version)
     if not results_folder.is_dir() or len(list(results_folder.iterdir())) == 0:
         print(f"ERR: no results to merge for {results_folder}")
         return
 
-    # initialize images folder
+    # initialize output folders
     imgs_dir = util.img_dir(mosaic_type, args.cubic_version)
-    existing_imgs: dict[str, str] = {}
+    out_file = util.output_path(mosaic_type, args.cubic_version)
+    # mapping from mosaic to knotID
     if imgs_dir.exists():
-        if args.keep_existing:
-            # mapping from mosaic to knotID
-            for img in imgs_dir.glob("*.png"):
-                parts = img.stem.split("-")
-                existing_imgs[parts[2]] = parts[1]
-        else:
-            [f.unlink() for f in imgs_dir.iterdir()]
+        [f.unlink() for f in imgs_dir.iterdir()]
     else:
         imgs_dir.mkdir(parents=True)
 
-    # initialize output file
-    out_file = util.output_path(mosaic_type, args.cubic_version)
-    if out_file.is_file():
-        out_file.unlink()
-    # maps polynomial to knot result
+    # maps knotID to knot result
     all_results: dict[str, util.KnotResult] = {}
 
     # merge results, keeping lowest tile number
+    print("Merging results...")
     for file in results_folder.iterdir():
-        results, complete = util.load_result_file(file)
+        results_list, complete = util.load_result_file(file)
         if not complete:
             print(f"{file} is incomplete")
-        for res in results:
-            prev_best = all_results.get(res.polynomial)
+        for res in results_list:
             # Only keep the better knot result
+            prev_best = all_results.get(res.knotID)
             if res.better_than(prev_best):
-                all_results[res.polynomial] = res
+                all_results[res.knotID] = res
+    
 
-    print(f"Calculating knot IDs for {len(all_results)} mosaics...")
-    # tuples of (knotID, polynomial)
-    knot_ids: list[tuple[str, util.KnotResult]] = []
-
-    for ct, (_, res) in enumerate(all_results.items()):
-        # yes, I'm re-running the ID/simplify steps.
-        # But the alternative is to run knotID on all the result files, which would be slow
+    print("Saving images...")
+    for res in all_results.values():
         mosaic = builder(res.mosaic_str)
-        knot = M.traverse_mosaic(mosaic, prune_unknots=False)
-        if type(knot) is M.NotAKnot:
-            print(f"ERR: Not a Knot({type(knot)}): {res.mosaic_str}")
-            break
-        knot = sage_funcs.make_knot(knot)  # type: ignore
-        new_knot = knot.simplify()
-        if new_knot is not None:
-            knot = new_knot
+        # generating and saving image
+        img_path = util.img_filepath(imgs_dir, res)
+        mvis.gen_png(mosaic, res.mosaic_str, res.knotID, img_path)
 
-        if (knotid := existing_imgs.get(res.mosaic_str)) is not None:
-            print(f"{ct}- keeping img for {knotid}")
-        else:
-            # this can be *VERY* slow for some knots. Times out after 60 seconds
-            knotid = sage_funcs.get_knotinfo_with_timeout(knot, 60)
-            if knotid is None:
-                print(
-                    f"TIMEOUT ERROR getting knotID for {knot}, mosaic: {res.mosaic_str}"
-                )
-                knotid = "UNKNOWN"
-            else:
-                # cleaning up the KnotInfo output
-                for s in ["KnotInfo", "[", "]", "'"]:
-                    knotid = knotid.replace(s, "")
-
-            # generating and saving image
-            img_path = util.img_filepath(imgs_dir, res, knotid)
-            mvis.gen_png(mosaic, res.mosaic_str, knotid, img_path)
-            print(f"{ct}- saved: {img_path}")
-
-        # Update polynomial to standardized form
-        new_polynomial = str(knot.homfly_polynomial(normalization="vz"))
-        new_polynomial = poly.HOMFLY.from_string(new_polynomial)
-        res.polynomial = str(new_polynomial)
-        knot_ids.append((knotid, res))  # type: ignore - this is protected from being none
-        with out_file.open("a") as out:
-            out.write(f"{knotid}|{res.to_str()}\n")
 
     # generate output file
-    knot_ids.sort(key=lambda k: k[0])
-    padding = max(len(k) for k, _ in knot_ids) + 1
+    results_sorted = sorted(all_results.values(), key=lambda res:res.knotID)
     with out_file.open("w") as out:
-        for id, res in knot_ids:
-            out.write(f"{id.ljust(padding)}|{res.to_str()}\n")
+        text = "\n".join(res.to_str() for res in results_sorted)
+        out.write(text)
+    print("Done merging")
 
 
 def handle_str(args):
