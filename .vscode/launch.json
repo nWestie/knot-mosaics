@@ -25,7 +25,7 @@
             "request": "launch",
             "program": "./main.py",
             "console": "integratedTerminal",
-            "args": "file data/3_mobius/pt0000.txt test.txt mobius", 
+            "args": "merge mobius --keep-existing", 
         },
     ]
 }
