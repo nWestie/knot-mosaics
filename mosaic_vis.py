@@ -4,8 +4,8 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 from tkinter.filedialog import askopenfilename
-from mosaics import NormMosaic, parser_types
-from mosaic_util import *
+from mosaics import BaseMosaic, NormMosaic, parser_types
+import mosaic_util as util
 
 
 def main_browser():
@@ -15,7 +15,7 @@ def main_browser():
     # ImageBrowser.from_strings(["0021127a98883434"], parser_types["cubic"]).mainloop()
 
 
-def gen_png(mosaic: NormMosaic, mosaic_str: str, id: str, img_path: Path):
+def gen_png(mosaic: BaseMosaic, mosaic_str: str, id: str, img_path: Path):
     """Builds a PNG with metadata shown above/below mosaic"""
 
     from matplotlib import pyplot as plt
@@ -37,7 +37,7 @@ def gen_png(mosaic: NormMosaic, mosaic_str: str, id: str, img_path: Path):
     ax[1].text(
         0.5,
         0.5,
-        f"ID: {id} Tile #: {count_tiles(mosaic_str)}",
+        f"ID: {id} Tile #: {util.count_tiles(mosaic_str)}",
         ha="center",
         va="center",
         fontsize=16,
@@ -49,7 +49,7 @@ def gen_png(mosaic: NormMosaic, mosaic_str: str, id: str, img_path: Path):
     plt.close(fig)
 
 
-def build_img(mosaic: NormMosaic) -> Image.Image:
+def build_img(mosaic: BaseMosaic) -> Image.Image:
     """Builds a PIL image from a set of mosaic tiles"""
     if not hasattr(build_img, "tiles"):
         build_img.tiles = load_tile_imgs()
@@ -58,9 +58,9 @@ def build_img(mosaic: NormMosaic) -> Image.Image:
     tile_size = tiles[0].width
 
     out_img = Image.new(
-        "RGB", (tile_size * mosaic.width, tile_size * mosaic.height), "white"
+        "RGBA", (tile_size * mosaic.width, tile_size * mosaic.height), (255, 0, 0, 0)
     )
-
+        
     for i, tile in enumerate(mosaic.tiles):
         x, y = index_to_xy(i, mosaic.width)
         out_img.paste(tiles[tile], (x * tile_size, y * tile_size))

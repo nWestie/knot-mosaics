@@ -1,10 +1,10 @@
-   
 import argparse
 from pathlib import Path
 import main
 import mosaics as M
 
-def knot_argparser()->argparse.ArgumentParser:
+
+def knot_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subs = parser.add_subparsers(help="mode to run in", required=True)
     parser.add_argument(
@@ -63,6 +63,12 @@ def knot_argparser()->argparse.ArgumentParser:
         help="Type of cubic to pull results from, must match the folder path",
         type=str,
     )
+    merge.add_argument(
+        "-p",
+        "--publish",
+        help="generate images in 'published' form - without frame, mobius/toric w/out added crossings, cubic as lower-case t",
+        action="store_true",
+    )
     merge.set_defaults(func=main.combine_results)
 
     file = subs.add_parser("file", help="parse single file")
@@ -70,5 +76,5 @@ def knot_argparser()->argparse.ArgumentParser:
     file.add_argument("output_file", help="path to ouput results to", type=Path)
     file.add_argument("type", help="type of mosaic", type=str)
     file.set_defaults(func=main.handle_file)
-    
+
     return parser

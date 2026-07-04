@@ -37,7 +37,7 @@ class CubicResult(util.KnotResult):
     @classmethod
     def from_result(cls, res: util.KnotResult, face_ct: int) -> "CubicResult":
         return CubicResult(
-            res.size, res.mosaic_str, res.tile_ct, res.polynomial, face_ct
+            res.size, res.mosaic_str, res.tile_ct, res.polynomial, res.knotID, face_ct
         )
 
 
@@ -258,7 +258,7 @@ def combine_results_cubic() -> Iterable[CubicResult]:
             print(f"Parsing {res_dir}...")
 
             for file in res_dir.glob("*"):
-                results, complete = util.load_result_file(file)
+                results, complete = util.load_result_file(file, use_dep=True)
                 if not complete:
                     print(f"WARN: {file} is incomplete")
                 for res in results:
@@ -310,7 +310,7 @@ def main():
             if res.face_ct == 1:
                 mosaic = M.NormMosaic.build_flat(res.mosaic_str)
             else:
-                mosaic = M.NormMosaic.build_cubic(res.mosaic_str)
+                mosaic = M.NormMosaic.build_cubic(res.mosaic_str, True)
             mvis.gen_png(mosaic, res.mosaic_str, knot, img_file)
 
             # build table entry

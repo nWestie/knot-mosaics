@@ -26,7 +26,7 @@ def handle_file(args):
 
 def run_catalog(args):
     """Uses multiple processes to parse through a directory of mosaic files"""
-    [type, size, redo] = [args.type, args.size, not args.keep_existing]
+    [type, size, keep_existing_results] = [args.type, args.size, args.keep_existing]
     builder: Callable[[str], M.NormMosaic] = M.parser_types[type]
 
     inp_dir = util.mosaic_dir(type, size, args.cubic_version)
@@ -92,7 +92,7 @@ def run_catalog(args):
                 out_path = out_dir / f"{size}_pt{out_index:04}.txt"
                 out_index += 1
                 # if output is already generated:
-                if out_path.is_file() and not redo:
+                if out_path.is_file() and keep_existing_results:
                     continue
                 # if we're done all the files in the folder, exit
                 if args.verbose:
@@ -122,7 +122,7 @@ def catalog_files(in_files: list[Path], out_file: Path, builder: Callable):
 
     # maps knotID to a result object
     knot_res_byID: dict[str, util.KnotResult] = {}
-    
+
     # maps polynomials to their knotID(s)
     # Contains all prime knots thru size 13, we don't care about above that
     knotID_DB = poly.KnotIDDB.load_from_file(Path("data/knotIDDB.pkl"))
@@ -217,34 +217,48 @@ def catalog_files(in_files: list[Path], out_file: Path, builder: Callable):
     )
 
 
-def disambiguate_knot(knotIDs: tuple[str,...], knot) -> str:
+def disambiguate_knot(knotIDs: tuple[str, ...], knot) -> str:
     # number of crossings of the simplified knot
     # may still be > the minimum-crossing-number
     max_crossings = len(knot.pd_code())
-    valid = [id for id in knotIDs if util.knot_size_from_id(id)<=max_crossings]
+    valid = [id for id in knotIDs if util.knot_size_from_id(id) <= max_crossings]
     if len(valid) == 1:
         return valid[0]
-    print(f"Using sage to disambiguate: {",".join(valid)}")
+    # print(f"Failed to disambiguate: {','.join(valid)}",flush=True)
+    # return ",".join(valid)
 
+    print(f"Using sage to disambiguate: {",".join(valid)}", flush=True)
     # this can be *VERY* slow for some knots. Times out after 60 seconds
     from sage_funcs import get_knotinfo_with_timeout
-    knotid = get_knotinfo_with_timeout(knot, 60)
-    if knotid is None:
-        print(f"DISAMBIGUATION_FAILED, Timeout-{",".join(valid)}")
-        return f"AMBIGUOUS-{",".join(valid)}"
-    else:
-        # cleaning up the KnotInfo output
-        for s in ["KnotInfo", "[", "]", "'"]:
-            knotid = knotid.replace(s, "")
-        
+
+    knot_info = get_knotinfo_with_timeout(knot, 30)
+    if knot_info is None:
+        print(f"DISAMBIGUATION_FAILED, Timeout-{",".join(valid)}", flush=True)
+        return f"E_SAGE{",".join(valid)}"
+
+    def clean_knot(inp: str) -> str:
+        for s in ["KnotInfo", "[", "]", "'", "K", "m"]:
+            inp = inp.replace(s, "")
+        return inp
+
+    knot_info = [clean_knot(str(knot)) for knot in knot_info]
+    if len(knot_info) > 1:
+        print(
+            f"ERR - Sage failed to disambiguate knots - found {', '.join(knot_info)}",
+            flush=True,
+        )
+
+    print("--SAGE SUCCESS--", flush=True)
+    # cleaning up the KnotInfo output
+    return ",".join(knot_info)
 
 
 def combine_results(args):
     """Takes a dir of knot results and combines them, selecting the lowest tile # for each knot"""
+    from natsort import natsorted
 
     mosaic_type = args.type
     builder = M.parser_types[args.type]
-
     # check that there are results to merge
     results_folder = util.results_dir_knotID(mosaic_type, args.cubic_version)
     if not results_folder.is_dir() or len(list(results_folder.iterdir())) == 0:
@@ -274,21 +288,29 @@ def combine_results(args):
             prev_best = all_results.get(res.knotID)
             if res.better_than(prev_best):
                 all_results[res.knotID] = res
-    
-
-    print("Saving images...")
-    for res in all_results.values():
-        mosaic = builder(res.mosaic_str)
-        # generating and saving image
-        img_path = util.img_filepath(imgs_dir, res)
-        mvis.gen_png(mosaic, res.mosaic_str, res.knotID, img_path)
-
 
     # generate output file
-    results_sorted = sorted(all_results.values(), key=lambda res:res.knotID)
+    print("Saving resuts file...")
+    results_sorted = natsorted(all_results.values(), key=lambda res: res.knotID)
     with out_file.open("w") as out:
         text = "\n".join(res.to_str() for res in results_sorted)
         out.write(text)
+
+    print("Saving images...")
+    count = len(all_results.values())
+
+    for progress, res in enumerate(results_sorted):
+        if progress % int(count / 20) == 0:
+            print(f"  {progress/count:.0%} - {progress}/{count}")
+        mosaic = builder(res.mosaic_str)
+        # generating and saving image
+        img_path = util.img_filepath(imgs_dir, res)
+        if args.publish:
+            img = mvis.build_img(mosaic.get_publish_mosaic())
+            img.save(img_path)
+        else:
+            mvis.gen_png(mosaic, res.mosaic_str, res.knotID, img_path)
+
     print("Done merging")
 
 

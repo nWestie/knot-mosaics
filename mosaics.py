@@ -35,12 +35,20 @@ class NotAKnot(Enum):
     GOODKNOT = 3
 
 
+def ind_from_xy(x, y, width):
+    return y * width + x
+
+
 @dataclass
-class NormMosaic:
+class BaseMosaic:
     tiles: list[int]
     width: int
     height: int
     nominal_size: int
+
+
+@dataclass
+class NormMosaic(BaseMosaic):
     # mapping of connections at the edges
     edge_conns: dict[tuple[int, int, int], MosaicConn]
 
@@ -79,6 +87,31 @@ class NormMosaic:
         if not self.in_bounds(pos):
             return NotAKnot.BAD_CONNECTIONS
         return pos
+
+    def get_publish_mosaic(self) -> BaseMosaic:
+        # flat/cylindrical mosaics
+        if self.width == self.height:
+            return self
+        # mobius/toric mosaics (remove just 'front' tiles not hidden crossings)
+        elif self.width > self.height:
+            tiles = []
+            for row_ind in range(self.height):
+                start_ind = ind_from_xy(0, row_ind, self.width)
+                tiles += self.tiles[start_ind : start_ind + self.nominal_size]
+            size = self.nominal_size
+            return BaseMosaic(tiles, size, size, size)
+        # cubic mosaics (as lower-case 't' shape)
+        elif self.width < self.height:
+            tiles = []
+            size = self.nominal_size
+            start_ind = (size * 3)**2
+            # for row_ind in range(size):
+            #     ind = start_ind + ind_from_xy(size,row_ind,self.width)
+            #     tiles += self.tiles
+            tiles = self.tiles[start_ind:] + self.tiles[:start_ind]
+            return BaseMosaic(tiles, self.width, self.height, size)
+        else:
+            raise ValueError("This should never happen")
 
     @classmethod
     def build_flat(cls, string: str) -> "NormMosaic":
@@ -119,6 +152,8 @@ class NormMosaic:
         rows = ["".join(r) + blanks for r in rows]
         tiles = string2tiles("".join(rows))
         mosaic = NormMosaic(tiles, nom_size * 2, nom_size, nom_size, {})
+        # filling in crossings on 'backside' of the mobius band
+        # representing the hidden crossings you'd get on a mobius band.
         for y_ind in range(nom_size):
             tile = mosaic.get_tile(Pos(nom_size - 1, y_ind))
             if tile and 0 in connections_dict[tile].keys():
@@ -152,15 +187,16 @@ class NormMosaic:
         sz = int(math.sqrt(cube_len / 6))
         width = sz * 3
         height = sz * 4
-        tiles = [12] * (width * height)
 
-        # move tiles to their grid positions
-        def ind_from_xy(x, y):
-            return y * width + x
+        # background is transparent tiles
+        tiles = [11] * (width * height)
 
+        # move top half (horizontal) tiles into position
         tiles[0 : cube_len // 2] = cube_tiles[0 : cube_len // 2]
+        # move bottom half (vertical) tiles into position
+        # leaves sides as background(12)
         for i in range(sz * 3):
-            out_i = ind_from_xy(sz, sz + i)
+            out_i = ind_from_xy(sz, sz + i, width)
             inp_i = sz * i + cube_len // 2
             tiles[out_i : out_i + sz] = cube_tiles[inp_i : inp_i + sz]
 

@@ -1,11 +1,12 @@
 from dataclasses import dataclass
+import functools
 from pathlib import Path
 from typing import Callable
 
 
 def string2tiles(string: str) -> list[int]:
     """convert each char in the string to an int,
-    using hex conversion to properly convert 'a' to 11"""
+    using hex conversion to properly convert 'a' to 10"""
     return [int(elem, base=16) for elem in string.strip()]
 
 
@@ -76,6 +77,8 @@ def img_filepath(dir: Path, res: "KnotResult"):
     return img_path
 
 
+
+
 @dataclass
 class KnotResult:
     """Seperating this allows us to compare results without calculating the polynomial"""
@@ -114,8 +117,18 @@ class KnotResult:
         parts = [s.strip() for s in str.split("|")]
         return KnotResult(int(parts[1]), parts[2], int(parts[3]), parts[4], parts[0])
 
+    @classmethod
+    def from_str_dep(cls, str: str):
+        if not hasattr(cls, "warned_dep"):
+            cls.warned_dep = True
+            print("WARN: using old results, knot IDs will be incorrect")
+        parts = [s.strip() for s in str.split("|")]
+        return KnotResult(int(parts[0]), parts[1], int(parts[2]), parts[3], "NONE_ID")
 
-def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
+
+def load_result_file(
+    file: Path, *, use_dep: bool = False
+) -> tuple[list[KnotResult], bool]:
     """Extracts knot results from file. Returns true if file contains the correct end-indicator"""
     results: list[KnotResult] = []
     with file.open("r") as inp:
@@ -125,5 +138,9 @@ def load_result_file(file: Path) -> tuple[list[KnotResult], bool]:
             if line == "END_RESULT":
                 return results, True
             if line:
-                results.append(KnotResult.from_str(line))
+                if use_dep:
+                    results.append(KnotResult.from_str_dep(line))
+                else:
+                    results.append(KnotResult.from_str(line))
+
     return results, False
