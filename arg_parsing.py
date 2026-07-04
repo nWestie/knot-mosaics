@@ -51,6 +51,11 @@ def knot_argparser() -> argparse.ArgumentParser:
         help="Allow parsing of incomplete result folders",
         action="store_true",
     )
+    parse.add_argument(
+        "--no-sage",
+        help="skip using sage to disambiguate knots",
+        action="store_true",
+    )
     parse.set_defaults(func=main.run_catalog)
 
     merge = subs.add_parser("merge", help="merge result files with this ID string")
@@ -75,6 +80,11 @@ def knot_argparser() -> argparse.ArgumentParser:
     file.add_argument("input_file", help="path of file to parse", type=Path)
     file.add_argument("output_file", help="path to ouput results to", type=Path)
     file.add_argument("type", help="type of mosaic", type=str)
+    file.add_argument(
+        "--no-sage",
+        help="skip using sage to disambiguate knots",
+        action="store_true",
+    )
     file.set_defaults(func=main.handle_file)
 
     return parser

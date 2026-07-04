@@ -21,7 +21,7 @@ def main():
 
 def handle_file(args):
     # raise NotImplementedError("Implement for multi-type input")
-    catalog_files([args.input_file], args.output_file, M.parser_types[args.type])
+    catalog_files([args.input_file], args.output_file, M.parser_types[args.type],skip_sage=args.no_sage)
 
 
 def run_catalog(args):
@@ -97,7 +97,9 @@ def run_catalog(args):
                 # if we're done all the files in the folder, exit
                 if args.verbose:
                     print(f"Queued {",".join(f.stem for f in in_paths)}", flush=True)
-                fut = executor.submit(catalog_files, in_paths, out_path, builder)
+                fut = executor.submit(
+                    catalog_files, in_paths, out_path, builder, args.no_sage
+                )
                 futures[fut] = out_index - 1
 
                 # stops loop when out of inputs
@@ -115,7 +117,9 @@ def run_catalog(args):
         print("fully shutdown now")
 
 
-def catalog_files(in_files: list[Path], out_file: Path, builder: Callable):
+def catalog_files(
+    in_files: list[Path], out_file: Path, builder: Callable, skip_sage: bool = False
+):
     """Finds all unique knots in a set of files"""
 
     from sage_funcs import make_knot
@@ -183,7 +187,7 @@ def catalog_files(in_files: list[Path], out_file: Path, builder: Callable):
                 # with a low-crossing knot. No great way to filter for this
                 knotID = knotIDs[0]
             else:
-                knotID = disambiguate_knot(knotIDs, knot)
+                knotID = disambiguate_knot(knotIDs, knot,skip_sage=skip_sage)
             # cache this pd->knotID relation
             pd_code_cache[pd_codes_str] = knotID
 
@@ -217,15 +221,16 @@ def catalog_files(in_files: list[Path], out_file: Path, builder: Callable):
     )
 
 
-def disambiguate_knot(knotIDs: tuple[str, ...], knot) -> str:
+def disambiguate_knot(knotIDs: tuple[str, ...], knot, skip_sage: bool = False) -> str:
     # number of crossings of the simplified knot
     # may still be > the minimum-crossing-number
     max_crossings = len(knot.pd_code())
     valid = [id for id in knotIDs if util.knot_size_from_id(id) <= max_crossings]
     if len(valid) == 1:
         return valid[0]
-    # print(f"Failed to disambiguate: {','.join(valid)}",flush=True)
-    # return ",".join(valid)
+
+    if skip_sage:
+        return ",".join(valid)
 
     print(f"Using sage to disambiguate: {",".join(valid)}", flush=True)
     # this can be *VERY* slow for some knots. Times out after 60 seconds

@@ -26,7 +26,7 @@
             "program": "./main.py",
             "console": "integratedTerminal",
             // "args": "merge mobius", 
-            "args": "file data/testinp.txt data/tempout.txt mobius", 
+            "args": "file data/testinp.txt data/tempout.txt mobius --no-sage", 
         },
     ]
 }
