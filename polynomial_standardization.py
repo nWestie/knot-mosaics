@@ -144,7 +144,7 @@ class KnotIDDB:
             knots = tuple(k.strip() for k in knots.split(","))
 
             # status printing
-            size = util.knot_size_from_id(knots[0])
+            size = util.knot_order_from_id(knots[0])
             if size > max_size:
                 return
             # save key

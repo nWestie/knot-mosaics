@@ -225,7 +225,7 @@ def disambiguate_knot(knotIDs: tuple[str, ...], knot, skip_sage: bool = False) -
     # number of crossings of the simplified knot
     # may still be > the minimum-crossing-number
     max_crossings = len(knot.pd_code())
-    valid = [id for id in knotIDs if util.knot_size_from_id(id) <= max_crossings]
+    valid = [id for id in knotIDs if util.knot_order_from_id(id) <= max_crossings]
     if len(valid) == 1:
         return valid[0]
 
